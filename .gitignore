@@ -1,0 +1,33 @@
+# Unity generated directories
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Uu]ser[Ss]ettings/
+
+# Unity generated files
+*.csproj
+*.sln
+*.suo
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+
+# Unity captures and recordings
+[Mm]emoryCaptures/
+[Rr]ecordings/
+
+# IDE settings and OS metadata
+.vs/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,46 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!129 &1
+PlayerSettings:
+  m_ObjectHideFlags: 0
+  serializedVersion: 26
+  productGUID: 48a0e5955ee04848bb9ebd1fa71b750c
+  companyName: Prototype Studio
+  productName: Verdant Blade
+  defaultScreenWidth: 1280
+  defaultScreenHeight: 720
+  defaultScreenWidthWeb: 960
+  defaultScreenHeightWeb: 600
+  defaultScreenOrientation: 4
+  useOnDemandResources: 0
+  m_SplashScreenBackgroundColor: {r: 0.122, g: 0.149, b: 0.122, a: 1}
+  m_ShowUnitySplashScreen: 0
+  m_ShowUnitySplashLogo: 0
+  m_ActiveColorSpace: 0
+  m_MTRendering: 1
+  fullscreenMode: 3
+  runInBackground: 1
+  allowFullscreenSwitch: 1
+  resizableWindow: 1
+  visibleInBackground: 1
+  applicationIdentifier:
+    Standalone: com.prototypestudio.verdantblade
+  buildNumber:
+    Standalone: 0
+  scriptingDefineSymbols: {}
+  additionalCompilerArguments: {}
+  platformArchitecture: {}
+  scriptingBackend: {}
+  il2cppCompilerConfiguration: {}
+  il2cppCodeGeneration: {}
+  managedStrippingLevel: {}
+  incrementalIl2cppBuild: {}
+  suppressCommonWarnings: 1
+  allowUnsafeCode: 0
+  useDeterministicCompilation: 1
+  additionalIl2CppArgs: 
+  scriptingRuntimeVersion: 1
+  gcIncremental: 1
+  apiCompatibilityLevelPerPlatform: {}
+  m_RenderingPath: 1
+  m_MobileRenderingPath: 1
