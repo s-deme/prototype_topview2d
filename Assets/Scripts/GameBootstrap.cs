@@ -112,30 +112,33 @@ namespace VerdantBlade
             var hero = player.AddComponent<HeroController>();
             GameManager.Instance.RegisterPlayer(hero);
 
-            SpawnEnemy("Slime", new Vector2(-2.6f, -0.6f), new Color(0.47f, 0.75f, 0.42f), 2, 1.3f);
-            SpawnEnemy("Slime", new Vector2(2.3f, -1.3f), new Color(0.42f, 0.82f, 0.63f), 2, 1.45f);
-            SpawnEnemy("Slime", new Vector2(5.1f, 4.5f), new Color(0.58f, 0.74f, 0.34f), 3, 1.55f);
-            SpawnEnemy("Slime", new Vector2(8.9f, -4.8f), new Color(0.43f, 0.72f, 0.39f), 3, 1.7f);
-            SpawnEnemy("Slime", new Vector2(-6.5f, -5.5f), new Color(0.41f, 0.79f, 0.55f), 2, 1.35f);
-            SpawnEnemy("Slime", new Vector2(0.2f, 5.6f), new Color(0.57f, 0.82f, 0.44f), 3, 1.5f);
-            SpawnRangedEnemy(new Vector2(-3.7f, 4.8f));
-            SpawnRangedEnemy(new Vector2(7.1f, 4.6f));
-            SpawnGuardian(new Vector2(7.7f, 5.5f));
+            SpawnEnemy("Slime", new Vector2(-2.6f, -0.6f), new Color(0.47f, 0.75f, 0.42f), 2, 1.3f, "slime-1");
+            SpawnEnemy("Slime", new Vector2(2.3f, -1.3f), new Color(0.42f, 0.82f, 0.63f), 2, 1.45f, "slime-2");
+            SpawnEnemy("Slime", new Vector2(5.1f, 4.5f), new Color(0.58f, 0.74f, 0.34f), 3, 1.55f, "slime-3");
+            SpawnEnemy("Slime", new Vector2(8.9f, -4.8f), new Color(0.43f, 0.72f, 0.39f), 3, 1.7f, "slime-4");
+            SpawnEnemy("Slime", new Vector2(-6.5f, -5.5f), new Color(0.41f, 0.79f, 0.55f), 2, 1.35f, "slime-5");
+            SpawnEnemy("Slime", new Vector2(0.2f, 5.6f), new Color(0.57f, 0.82f, 0.44f), 3, 1.5f, "slime-6");
+            SpawnRangedEnemy(new Vector2(-3.7f, 4.8f), "wisp-1");
+            SpawnRangedEnemy(new Vector2(7.1f, 4.6f), "wisp-2");
+            SpawnGuardian(new Vector2(7.7f, 5.5f), "warden");
 
-            SpawnGem(new Vector2(-8.8f, 0.2f));
-            SpawnGem(new Vector2(-3.4f, 5.2f));
-            SpawnGem(new Vector2(-1.5f, -0.8f));
-            SpawnGem(new Vector2(0f, 1.3f));
-            SpawnGem(new Vector2(3.8f, -0.6f));
-            SpawnGem(new Vector2(4.9f, 5.5f));
-            SpawnGem(new Vector2(9.7f, 0.5f));
-            SpawnGem(new Vector2(10f, -5.4f));
-            SpawnHeart(new Vector2(-7.3f, -1.4f));
-            SpawnHeart(new Vector2(6.8f, -4.9f));
-            CreatePot(new Vector2(-7.1f, -0.4f), Collectible.Kind.Heart);
-            CreatePot(new Vector2(-0.4f, 4.8f), Collectible.Kind.Gem);
-            CreatePot(new Vector2(5.2f, -5.2f), Collectible.Kind.Heart);
-            CreatePot(new Vector2(8.8f, 1.8f), Collectible.Kind.Gem);
+            var shardPositions = new[]
+            {
+                new Vector2(-8.8f, 0.2f), new Vector2(-3.4f, 5.2f), new Vector2(-1.5f, -0.8f), new Vector2(0f, 1.3f),
+                new Vector2(3.8f, -0.6f), new Vector2(4.9f, 5.5f), new Vector2(9.7f, 0.5f), new Vector2(10f, -5.4f),
+                new Vector2(-9.1f, -4.9f), new Vector2(-5.7f, 3.4f), new Vector2(1.6f, -1.9f), new Vector2(8.9f, 3.1f)
+            };
+            var start = GameManager.Instance.WorldVariant * 2;
+            for (var index = 0; index < GameRules.ShardGoal; index++)
+            {
+                SpawnGem(shardPositions[(start + index) % shardPositions.Length], "shard-" + (index + 1));
+            }
+            SpawnHeart(new Vector2(-7.3f, -1.4f), "heart-1");
+            SpawnHeart(new Vector2(6.8f, -4.9f), "heart-2");
+            CreatePot(new Vector2(-7.1f, -0.4f), Collectible.Kind.Heart, "pot-1");
+            CreatePot(new Vector2(-0.4f, 4.8f), Collectible.Kind.Gem, "pot-2");
+            CreatePot(new Vector2(5.2f, -5.2f), Collectible.Kind.Heart, "pot-3");
+            CreatePot(new Vector2(8.8f, 1.8f), Collectible.Kind.Gem, "pot-4");
             CreateGoal(new Vector2(10.7f, 5.8f));
         }
 
@@ -162,31 +165,35 @@ namespace VerdantBlade
             CreateVisual("Blade Hilt", new Vector2(0f, -0.35f), new Vector2(0.1f, 0.22f), new Color(0.36f, 0.21f, 0.1f), 8, hero);
         }
 
-        private void SpawnEnemy(string objectName, Vector2 position, Color color, int health, float speed)
+        private void SpawnEnemy(string objectName, Vector2 position, Color color, int health, float speed, string entityId)
         {
+            if (!GameManager.Instance.ShouldSpawnEntity(entityId)) return;
             var enemy = CreateCharacter(objectName, position, color);
             var controller = enemy.AddComponent<EnemyController>();
-            controller.Configure(GameRules.EnemyHealth(health, GameManager.Instance.SelectedDifficulty), GameRules.EnemySpeed(speed, GameManager.Instance.SelectedDifficulty));
+            controller.Configure(GameRules.EnemyHealth(health, GameManager.Instance.SelectedDifficulty), GameRules.EnemySpeed(speed, GameManager.Instance.SelectedDifficulty), entityId);
         }
 
-        private void SpawnRangedEnemy(Vector2 position)
+        private void SpawnRangedEnemy(Vector2 position, string entityId)
         {
+            if (!GameManager.Instance.ShouldSpawnEntity(entityId)) return;
             var wisp = CreateCharacter("Moss Wisp", position, new Color(0.68f, 0.91f, 0.67f));
             var controller = wisp.AddComponent<RangedEnemyController>();
-            controller.Configure(GameRules.EnemyHealth(2, GameManager.Instance.SelectedDifficulty), GameRules.EnemySpeed(1.65f, GameManager.Instance.SelectedDifficulty));
+            controller.Configure(GameRules.EnemyHealth(2, GameManager.Instance.SelectedDifficulty), GameRules.EnemySpeed(1.65f, GameManager.Instance.SelectedDifficulty), entityId);
         }
 
-        private void SpawnGuardian(Vector2 position)
+        private void SpawnGuardian(Vector2 position, string entityId)
         {
+            if (!GameManager.Instance.ShouldSpawnEntity(entityId)) return;
             var guardian = CreateCharacter("Gate Warden", position, new Color(0.72f, 0.38f, 0.28f));
             CreateVisual("Warden Crown", new Vector2(0f, 0.42f), new Vector2(0.46f, 0.12f), new Color(0.94f, 0.65f, 0.24f), 7, guardian.transform);
             var controller = guardian.AddComponent<GuardianController>();
-            controller.Configure(GameRules.EnemyHealth(9, GameManager.Instance.SelectedDifficulty), GameRules.EnemySpeed(2.05f, GameManager.Instance.SelectedDifficulty));
+            controller.Configure(GameRules.EnemyHealth(9, GameManager.Instance.SelectedDifficulty), GameRules.EnemySpeed(2.05f, GameManager.Instance.SelectedDifficulty), entityId);
             guardian.AddComponent<ObjectiveTarget>().Configure(ObjectiveTargetKind.Warden);
         }
 
-        private void SpawnGem(Vector2 position)
+        private void SpawnGem(Vector2 position, string entityId = null)
         {
+            if (!GameManager.Instance.ShouldSpawnEntity(entityId)) return;
             var gem = new GameObject("Sun Shard");
             gem.transform.SetParent(world);
             gem.transform.position = position;
@@ -196,12 +203,13 @@ namespace VerdantBlade
             var trigger = gem.AddComponent<CircleCollider2D>();
             trigger.isTrigger = true;
             trigger.radius = 0.48f;
-            gem.AddComponent<Collectible>().Configure(Collectible.Kind.Gem, 1);
+            gem.AddComponent<Collectible>().Configure(Collectible.Kind.Gem, 1, entityId);
             gem.AddComponent<ObjectiveTarget>().Configure(ObjectiveTargetKind.Shard);
         }
 
-        private void SpawnHeart(Vector2 position)
+        private void SpawnHeart(Vector2 position, string entityId = null)
         {
+            if (!GameManager.Instance.ShouldSpawnEntity(entityId)) return;
             var heart = new GameObject("Life Bloom");
             heart.transform.SetParent(world);
             heart.transform.position = position;
@@ -209,7 +217,7 @@ namespace VerdantBlade
             var trigger = heart.AddComponent<CircleCollider2D>();
             trigger.isTrigger = true;
             trigger.radius = 0.42f;
-            heart.AddComponent<Collectible>().Configure(Collectible.Kind.Heart, 1);
+            heart.AddComponent<Collectible>().Configure(Collectible.Kind.Heart, 1, entityId);
         }
 
         public void SpawnPickup(Collectible.Kind kind, Vector2 position)
@@ -224,8 +232,9 @@ namespace VerdantBlade
             }
         }
 
-        private void CreatePot(Vector2 position, Collectible.Kind dropKind)
+        private void CreatePot(Vector2 position, Collectible.Kind dropKind, string entityId)
         {
+            if (!GameManager.Instance.ShouldSpawnEntity(entityId)) return;
             var pot = new GameObject("Clay Pot");
             pot.transform.SetParent(world);
             pot.transform.position = position;
@@ -234,7 +243,7 @@ namespace VerdantBlade
             CreateVisual("Pot Rim", new Vector2(0f, 0.22f), new Vector2(0.55f, 0.1f), new Color(0.84f, 0.49f, 0.23f), 6, pot.transform);
             var collider = pot.AddComponent<BoxCollider2D>();
             collider.size = new Vector2(0.44f, 0.46f);
-            pot.AddComponent<BreakablePot>().Configure(dropKind, 1);
+            pot.AddComponent<BreakablePot>().Configure(dropKind, 1, entityId);
         }
 
         private void CreateGoal(Vector2 position)

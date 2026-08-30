@@ -34,6 +34,27 @@ namespace VerdantBlade.Tests
             Assert.Greater(GameRules.EnemyHealth(9, Difficulty.Veteran), GameRules.EnemyHealth(9, Difficulty.Explorer));
             Assert.Greater(GameRules.EnemySpeed(2f, Difficulty.Veteran), GameRules.EnemySpeed(2f, Difficulty.Explorer));
         }
+
+        [Test]
+        public void RunClockOnlyCountsActiveGameplay()
+        {
+            var clock = new RunClock();
+            clock.Tick(12.5f, true);
+            clock.Tick(50f, false);
+            clock.Tick(4.25f, true);
+
+            Assert.AreEqual(16.75f, clock.ElapsedSeconds, 0.001f);
+        }
+
+        [Test]
+        public void RunSnapshotRejectsOutOfRangeProgress()
+        {
+            var valid = new RunSnapshot { difficulty = (int)Difficulty.Adventurer, worldVariant = 2, shards = GameRules.ShardGoal, elapsedSeconds = 20f };
+            var invalid = new RunSnapshot { difficulty = (int)Difficulty.Adventurer, worldVariant = 4, shards = GameRules.ShardGoal + 1, elapsedSeconds = -1f, playerX = float.PositiveInfinity };
+
+            Assert.IsTrue(valid.IsValid());
+            Assert.IsFalse(invalid.IsValid());
+        }
     }
 }
 #endif

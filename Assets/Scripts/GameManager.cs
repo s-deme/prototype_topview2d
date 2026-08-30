@@ -23,6 +23,9 @@ namespace VerdantBlade
 
         public static GameManager Instance { get; private set; }
         public static readonly string[] AchievementIds = { "first_steps", "shard_seeker", "warden_slayer", "gatewalker", "unbroken", "swift_blade", "forest_hunter", "potter" };
+        public const string ProductVersion = "1.0.0";
+
+        private static bool startRunOnSceneLoad;
 
         public HeroController Player { get; private set; }
         public RunState State => state;
@@ -39,13 +42,18 @@ namespace VerdantBlade
         public bool LargeText { get; private set; }
         public Difficulty SelectedDifficulty { get; private set; } = Difficulty.Adventurer;
         public float SfxVolume { get; private set; } = 0.62f;
+        public float MusicVolume { get; private set; } = 0.38f;
+        public DisplayMode SelectedDisplayMode { get; private set; } = DisplayMode.Borderless;
+        public int ResolutionIndex { get; private set; }
+        public bool VSyncEnabled { get; private set; }
+        public int WorldVariant { get; private set; }
         public int ShardCount => shards;
         public int EnemiesDefeated { get; private set; }
         public int PotsBroken { get; private set; }
         public int DamageTaken { get; private set; }
         public int Combo => combo;
         public int BestCombo => bestCombo;
-        public float ElapsedRunSeconds => state == RunState.Title ? 0f : (IsFinished ? finishedAt - runStartedAt : Time.unscaledTime - runStartedAt);
+        public float ElapsedRunSeconds => state == RunState.Title ? 0f : runClock.ElapsedSeconds;
         public int CurrentScore => GameRules.CalculateScore(shards, combatScore, PotsBroken, Player == null ? 0 : Player.Health, bestCombo, state == RunState.Won, ElapsedRunSeconds);
 
         private const float ComboWindowSeconds = 3.5f;
@@ -53,8 +61,7 @@ namespace VerdantBlade
         private TitlePage titlePage;
         private int shards;
         private bool won;
-        private float runStartedAt;
-        private float finishedAt;
+        private readonly RunClock runClock = new RunClock();
         private float toastEndsAt;
         private string toastMessage;
         private int combatScore;
@@ -62,18 +69,34 @@ namespace VerdantBlade
         private int bestCombo;
         private float comboEndsAt;
         private bool newBestScore;
+        private bool runSubmitted;
+        private bool autoStartRun;
+        private bool newRunConfirmation;
         private bool pausedByFocusLoss;
         private bool pauseSettingsOpen;
         private bool bindingsOpen;
         private GameAction pendingBinding;
+        private bool gamepadBindingsOpen;
+        private GameAction pendingGamepadBinding;
         private int titleMenuIndex = 1;
+        private int settingsMenuIndex;
+        private int keyboardBindingsMenuIndex;
+        private int gamepadBindingsMenuIndex;
+        private int profileMenuIndex;
+        private int pauseMenuIndex;
+        private int resultMenuIndex;
+        private bool profileAchievementsOpen;
+        private Difficulty profileDifficulty = Difficulty.Adventurer;
         private bool resetConfirmation;
+        private bool resetSettingsConfirmation;
         private string profileNotice;
         private string settingsNotice;
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
         private bool showDiagnostics;
 #endif
         private readonly List<string> newAchievements = new List<string>();
+        private readonly HashSet<string> destroyedEntityIds = new HashSet<string>();
+        private RunSnapshot resumeSnapshot;
         private GUIStyle titleStyle;
         private GUIStyle bodyStyle;
         private GUIStyle subtleStyle;
@@ -84,6 +107,13 @@ namespace VerdantBlade
         private Font uiFont;
         private bool stylesUseLargeText;
         private bool stylesUseHighContrast;
+        private const float ReferenceWidth = 1280f;
+        private const float ReferenceHeight = 720f;
+        private float uiScale = 1f;
+        private Vector2 uiOffset;
+
+        private float ViewWidth => ReferenceWidth;
+        private float ViewHeight => ReferenceHeight;
 
         private int ComboBonus => bestCombo < 2 ? 0 : bestCombo * 10;
 
@@ -91,12 +121,41 @@ namespace VerdantBlade
         {
             Instance = this;
             SfxVolume = PlayerProfile.LoadSfxVolume();
+            MusicVolume = PlayerProfile.LoadMusicVolume();
             ReduceFlashing = PlayerProfile.LoadReduceFlashing();
             ScreenShakeEnabled = PlayerProfile.LoadScreenShake();
             HighContrast = PlayerProfile.LoadHighContrast();
             LargeText = PlayerProfile.LoadLargeText();
             SelectedDifficulty = PlayerProfile.LoadDifficulty();
+            SelectedDisplayMode = PlayerProfile.LoadDisplayMode();
+            ResolutionIndex = PlayerProfile.LoadResolutionIndex();
+            VSyncEnabled = PlayerProfile.LoadVSync();
+            autoStartRun = startRunOnSceneLoad;
+            startRunOnSceneLoad = false;
+            if (!autoStartRun)
+            {
+                resumeSnapshot = PlayerProfile.LoadRunSnapshot();
+                if (resumeSnapshot != null)
+                {
+                    SelectedDifficulty = (Difficulty)resumeSnapshot.difficulty;
+                    WorldVariant = resumeSnapshot.worldVariant;
+                    RestoreDestroyedEntityIds(resumeSnapshot.destroyedEntityIds);
+                }
+            }
+            if (resumeSnapshot == null)
+            {
+                WorldVariant = UnityEngine.Random.Range(0, 3);
+            }
+            ApplyDisplaySettings();
             Time.timeScale = 0f;
+        }
+
+        private void Start()
+        {
+            if (autoStartRun)
+            {
+                StartRun();
+            }
         }
 
         private void Update()
@@ -104,33 +163,27 @@ namespace VerdantBlade
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
             HandleDevelopmentShortcuts();
 #endif
-            if (CapturePendingBinding()) return;
+            if (CapturePendingBinding() || CapturePendingGamepadBinding()) return;
             if (state == RunState.Title)
             {
-                if (titlePage == TitlePage.Settings && !bindingsOpen) HandleSettingsShortcuts();
-                if (titlePage == TitlePage.Main)
-                {
-                    HandleTitleMenuInput();
-                }
-                else if (titlePage != TitlePage.Main && GameInput.MenuBackPressed && !bindingsOpen)
-                {
-                    titlePage = TitlePage.Main;
-                }
+                HandleTitleInput();
                 return;
             }
 
             if (IsFinished)
             {
-                if (GameInput.RestartPressed)
-                {
-                    RestartRun();
-                }
+                HandleResultInput();
                 return;
             }
 
-            if (GameInput.PausePressed)
+            runClock.Tick(Time.unscaledDeltaTime, IsPlaying);
+
+            if (GameInput.PausePressed && !pauseSettingsOpen)
             {
                 TogglePause();
+                // The default pause binding is Escape, which also means “back” in menus.
+                // Do not process that same key press again as a pause-menu action.
+                return;
             }
 
             if (IsPlaying && combo > 0 && Time.time > comboEndsAt)
@@ -138,15 +191,20 @@ namespace VerdantBlade
                 combo = 0;
             }
 
-            if (IsPaused && pauseSettingsOpen)
+            if (IsPaused)
             {
-                HandleSettingsShortcuts();
+                HandlePauseInput();
             }
         }
 
         private void OnDestroy()
         {
             Time.timeScale = 1f;
+        }
+
+        private void OnApplicationQuit()
+        {
+            SaveRunSnapshot();
         }
 
         private void OnApplicationFocus(bool hasFocus)
@@ -162,6 +220,10 @@ namespace VerdantBlade
         public void RegisterPlayer(HeroController player)
         {
             Player = player;
+            if (resumeSnapshot != null)
+            {
+                player.RestoreState(resumeSnapshot.playerHealth, new Vector2(resumeSnapshot.playerX, resumeSnapshot.playerY));
+            }
         }
 
         public void StartRun()
@@ -173,9 +235,74 @@ namespace VerdantBlade
 
             state = RunState.Playing;
             Time.timeScale = 1f;
-            runStartedAt = Time.unscaledTime;
+            runSubmitted = false;
+            if (resumeSnapshot != null)
+            {
+                shards = resumeSnapshot.shards;
+                combatScore = resumeSnapshot.combatScore;
+                EnemiesDefeated = resumeSnapshot.enemiesDefeated;
+                PotsBroken = resumeSnapshot.potsBroken;
+                DamageTaken = resumeSnapshot.damageTaken;
+                bestCombo = resumeSnapshot.bestCombo;
+                runClock.Reset(resumeSnapshot.elapsedSeconds);
+                ShowToast("中断した冒険を再開しました。", 2.8f);
+            }
+            else
+            {
+                runClock.Reset();
+                ShowToast("森に散らばる太陽の欠片を集めよう。", 4f);
+            }
             UnlockAchievement("first_steps");
-            ShowToast("森に散らばる太陽の欠片を集めよう。", 4f);
+            SaveRunSnapshot();
+        }
+
+        public void StartFreshRun()
+        {
+            if (state != RunState.Title)
+            {
+                return;
+            }
+            if (resumeSnapshot != null)
+            {
+                if (!newRunConfirmation)
+                {
+                    newRunConfirmation = true;
+                    ShowToast("保存中の冒険があります。もう一度決定すると破棄して新しく始めます。", 3.5f);
+                    return;
+                }
+                SubmitSnapshotAsAbandoned();
+                PlayerProfile.ClearRunSnapshot();
+                resumeSnapshot = null;
+                destroyedEntityIds.Clear();
+                startRunOnSceneLoad = true;
+                Time.timeScale = 1f;
+                SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
+                return;
+            }
+            StartRun();
+        }
+
+        public void ResumeRun()
+        {
+            if (state == RunState.Title && resumeSnapshot != null)
+            {
+                StartRun();
+            }
+        }
+
+        public bool ShouldSpawnEntity(string entityId)
+        {
+            return string.IsNullOrEmpty(entityId) || !destroyedEntityIds.Contains(entityId);
+        }
+
+        public void RegisterDestroyedEntity(string entityId)
+        {
+            if (string.IsNullOrEmpty(entityId))
+            {
+                return;
+            }
+            destroyedEntityIds.Add(entityId);
+            SaveRunSnapshot();
         }
 
         public void AddShard(int amount)
@@ -187,6 +314,7 @@ namespace VerdantBlade
                 UnlockAchievement("shard_seeker");
             }
             ShowToast(HasAllShards ? "太陽の欠片がそろった。守護者が目覚めた。" : "太陽の欠片を発見  " + shards + " / " + GameRules.ShardGoal, 2.2f);
+            SaveRunSnapshot();
         }
 
         public void ShowToast(string message, float duration = 1.7f)
@@ -199,6 +327,13 @@ namespace VerdantBlade
         {
             SfxVolume = Mathf.Clamp01(volume);
             if (SfxService.Instance != null) SfxService.Instance.SetVolume(SfxVolume);
+            SaveSettings();
+        }
+
+        public void SetMusicVolume(float volume)
+        {
+            MusicVolume = Mathf.Clamp01(volume);
+            if (SfxService.Instance != null) SfxService.Instance.SetMusicVolume(MusicVolume);
             SaveSettings();
         }
 
@@ -236,10 +371,12 @@ namespace VerdantBlade
 
             state = RunState.Won;
             won = true;
-            finishedAt = Time.unscaledTime;
             Time.timeScale = 0f;
             if (SfxService.Instance != null) SfxService.Instance.Play(SoundCue.Victory);
-            newBestScore = PlayerProfile.SubmitClear(CurrentScore, ElapsedRunSeconds, EnemiesDefeated, PotsBroken, shards, DamageTaken);
+            newBestScore = PlayerProfile.SubmitClear(SelectedDifficulty, CurrentScore, ElapsedRunSeconds, EnemiesDefeated, PotsBroken, shards, DamageTaken);
+            runSubmitted = true;
+            resumeSnapshot = null;
+            PlayerProfile.ClearRunSnapshot();
             UnlockAchievement("gatewalker");
             if (DamageTaken == 0) UnlockAchievement("unbroken");
             if (GameRules.IsSwiftClear(ElapsedRunSeconds)) UnlockAchievement("swift_blade");
@@ -253,9 +390,11 @@ namespace VerdantBlade
             }
             state = RunState.Defeated;
             won = false;
-            finishedAt = Time.unscaledTime;
             Time.timeScale = 0f;
-            PlayerProfile.SubmitAttempt(shards, EnemiesDefeated, PotsBroken, DamageTaken);
+            PlayerProfile.SubmitAttempt(SelectedDifficulty, shards, EnemiesDefeated, PotsBroken, DamageTaken, false);
+            runSubmitted = true;
+            resumeSnapshot = null;
+            PlayerProfile.ClearRunSnapshot();
         }
 
         public void MarkGuardianDefeated()
@@ -270,6 +409,7 @@ namespace VerdantBlade
             EnemiesDefeated++;
             combatScore += scoreValue;
             if (EnemiesDefeated >= 8) UnlockAchievement("forest_hunter");
+            SaveRunSnapshot();
         }
 
         public void RegisterCombatHit(int hitCount)
@@ -283,12 +423,14 @@ namespace VerdantBlade
         {
             PotsBroken++;
             if (PotsBroken >= 4) UnlockAchievement("potter");
+            SaveRunSnapshot();
         }
 
         public void RegisterDamageTaken(int amount)
         {
             DamageTaken += amount;
             combo = 0;
+            SaveRunSnapshot();
         }
 
         public void NotifyPlayerHealed(int amount)
@@ -302,16 +444,28 @@ namespace VerdantBlade
         private void OnGUI()
         {
             EnsureStyles();
-            if (state == RunState.Title)
+            var previousMatrix = GUI.matrix;
+            uiScale = Mathf.Min(Screen.width / ReferenceWidth, Screen.height / ReferenceHeight);
+            uiScale = Mathf.Max(0.01f, uiScale);
+            uiOffset = new Vector2((Screen.width - ReferenceWidth * uiScale) * 0.5f, (Screen.height - ReferenceHeight * uiScale) * 0.5f);
+            GUI.matrix = Matrix4x4.TRS(uiOffset, Quaternion.identity, Vector3.one * uiScale);
+            try
             {
-                DrawTitleScreen();
-                return;
-            }
+                if (state == RunState.Title)
+                {
+                    DrawTitleScreen();
+                    return;
+                }
 
-            DrawHud();
-            if (IsPlaying) DrawGuidance();
-            if (IsPaused) DrawPauseScreen();
-            if (IsFinished) DrawResultScreen();
+                DrawHud();
+                if (IsPlaying) DrawGuidance();
+                if (IsPaused) DrawPauseScreen();
+                if (IsFinished) DrawResultScreen();
+            }
+            finally
+            {
+                GUI.matrix = previousMatrix;
+            }
         }
 
         private void DrawHud()
@@ -327,30 +481,30 @@ namespace VerdantBlade
             GUI.Label(new Rect(34f, 134f, 268f, 23f), ObjectiveText(), subtleStyle);
 
             GUI.color = PanelColor(0.83f);
-            GUI.Box(new Rect(Screen.width - 258f, 18f, 240f, 142f), GUIContent.none);
+            GUI.Box(new Rect(ViewWidth - 258f, 18f, 240f, 142f), GUIContent.none);
             GUI.color = PrimaryTextColor;
-            GUI.Label(new Rect(Screen.width - 242f, 28f, 218f, 21f), "移動  WASD / 矢印 / スティック", subtleStyle);
-            GUI.Label(new Rect(Screen.width - 242f, 51f, 218f, 21f), "攻撃  " + GameInput.BindingLabel(GameAction.Attack) + " / クリック / A", subtleStyle);
-            GUI.Label(new Rect(Screen.width - 242f, 74f, 218f, 21f), DashText(), subtleStyle);
-            GUI.Label(new Rect(Screen.width - 242f, 97f, 218f, 21f), "ポーズ  " + GameInput.BindingLabel(GameAction.Pause) + " / P / START", subtleStyle);
-            GUI.Label(new Rect(Screen.width - 242f, 124f, 218f, 21f), combo > 1 ? "フローコンボ  x" + combo : "フローコンボ  連続で攻撃", bodyStyle);
+            GUI.Label(new Rect(ViewWidth - 242f, 28f, 218f, 21f), "移動  WASD / 矢印 / スティック", subtleStyle);
+            GUI.Label(new Rect(ViewWidth - 242f, 51f, 218f, 21f), "攻撃  " + GameInput.BindingLabel(GameAction.Attack) + " / クリック / " + GameInput.GamepadHintLabel(GameAction.Attack), subtleStyle);
+            GUI.Label(new Rect(ViewWidth - 242f, 74f, 218f, 21f), DashText(), subtleStyle);
+            GUI.Label(new Rect(ViewWidth - 242f, 97f, 218f, 21f), "ポーズ  " + GameInput.BindingLabel(GameAction.Pause) + " / P / " + GameInput.GamepadHintLabel(GameAction.Pause), subtleStyle);
+            GUI.Label(new Rect(ViewWidth - 242f, 124f, 218f, 21f), combo > 1 ? "フローコンボ  x" + combo : "フローコンボ  連続で攻撃", bodyStyle);
 
             if (HasAllShards && !IsGuardianDefeated)
             {
                 GUI.color = PanelColor(0.9f);
-                GUI.Box(new Rect(Screen.width * 0.5f - 170f, 18f, 340f, 30f), GUIContent.none);
+                GUI.Box(new Rect(ViewWidth * 0.5f - 170f, 18f, 340f, 30f), GUIContent.none);
                 GUI.color = new Color(1f, 0.66f, 0.4f);
-                GUI.Label(new Rect(Screen.width * 0.5f - 160f, 21f, 320f, 24f), "門の守護者  —  撃破せよ", bodyCenterStyle);
+                GUI.Label(new Rect(ViewWidth * 0.5f - 160f, 21f, 320f, 24f), "門の守護者  —  撃破せよ", bodyCenterStyle);
             }
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
             if (showDiagnostics)
             {
                 GUI.color = PanelColor(0.86f);
-                GUI.Box(new Rect(18f, Screen.height - 88f, 294f, 62f), GUIContent.none);
+                GUI.Box(new Rect(18f, ViewHeight - 88f, 294f, 62f), GUIContent.none);
                 GUI.color = PrimaryTextColor;
-                GUI.Label(new Rect(30f, Screen.height - 82f, 270f, 22f), "開発用  状態=" + state + "  欠片=" + shards + "  コンボ=" + combo + "/" + bestCombo, subtleStyle);
-                GUI.Label(new Rect(30f, Screen.height - 59f, 270f, 22f), "F1 HUD  •  F2 欠片  •  F3 回復", subtleStyle);
+                GUI.Label(new Rect(30f, ViewHeight - 82f, 270f, 22f), "開発用  状態=" + state + "  欠片=" + shards + "  コンボ=" + combo + "/" + bestCombo, subtleStyle);
+                GUI.Label(new Rect(30f, ViewHeight - 59f, 270f, 22f), "F1 HUD  •  F2 欠片  •  F3 回復", subtleStyle);
             }
 #endif
         }
@@ -358,12 +512,13 @@ namespace VerdantBlade
         private void DrawTitleScreen()
         {
             GUI.color = new Color(0.015f, 0.04f, 0.03f, 0.72f);
-            GUI.Box(new Rect(0f, 0f, Screen.width, Screen.height), GUIContent.none);
-            var width = Mathf.Min(600f, Screen.width - 34f);
-            var x = (Screen.width - width) * 0.5f;
-            var y = Mathf.Max(26f, Screen.height * 0.12f);
+            GUI.Box(new Rect(0f, 0f, ViewWidth, ViewHeight), GUIContent.none);
+            var width = Mathf.Min(600f, ViewWidth - 34f);
+            var x = (ViewWidth - width) * 0.5f;
+            var panelHeight = titlePage == TitlePage.Settings ? 650f : titlePage == TitlePage.Profile ? (profileAchievementsOpen ? 590f : 550f) : 530f;
+            var y = Mathf.Max(20f, (ViewHeight - panelHeight) * 0.5f);
             GUI.color = PanelColor(0.98f);
-            GUI.Box(new Rect(x, y, width, 472f), GUIContent.none);
+            GUI.Box(new Rect(x, y, width, panelHeight), GUIContent.none);
 
             GUI.color = AccentColor;
             GUI.Label(new Rect(x, y + 30f, width, 46f), "VERDANT BLADE", titleCenterStyle);
@@ -383,15 +538,24 @@ namespace VerdantBlade
         {
             GUI.Label(new Rect(x + 34f, y + 112f, width - 68f, 42f), "太陽の欠片を8個集め、門の守護者を倒して古代の門へ戻ろう。", bodyCenterStyle);
             if (DrawTitleMenuButton(new Rect(x + 128f, y + 160f, width - 256f, 32f), 0, "難易度  " + GameRules.DifficultyName(SelectedDifficulty) + "  •  " + GameRules.DifficultyDescription(SelectedDifficulty))) CycleDifficulty();
-            if (DrawTitleMenuButton(new Rect(x + 128f, y + 200f, width - 256f, 38f), 1, "冒険をはじめる  [Enter]")) StartRun();
-            if (DrawTitleMenuButton(new Rect(x + 128f, y + 246f, width - 256f, 32f), 2, "あそびかた")) titlePage = TitlePage.HowTo;
-            if (DrawTitleMenuButton(new Rect(x + 128f, y + 286f, width - 256f, 32f), 3, "設定・アクセシビリティ")) titlePage = TitlePage.Settings;
-            if (DrawTitleMenuButton(new Rect(x + 128f, y + 326f, width - 256f, 32f), 4, "冒険の記録")) titlePage = TitlePage.Profile;
+            var offset = 0f;
+            if (resumeSnapshot != null)
+            {
+                if (DrawTitleMenuButton(new Rect(x + 128f, y + 200f, width - 256f, 34f), 1, "冒険をつづきから  [Enter]")) ResumeRun();
+                if (DrawTitleMenuButton(new Rect(x + 128f, y + 240f, width - 256f, 34f), 2, newRunConfirmation ? "確認：保存した冒険を破棄して始める" : "新しい冒険をはじめる")) StartFreshRun();
+                offset = 40f;
+            }
+            else if (DrawTitleMenuButton(new Rect(x + 128f, y + 200f, width - 256f, 34f), 1, "冒険をはじめる  [Enter]")) StartFreshRun();
+            if (DrawTitleMenuButton(new Rect(x + 128f, y + 246f + offset, width - 256f, 32f), resumeSnapshot == null ? 2 : 3, "あそびかた")) titlePage = TitlePage.HowTo;
+            if (DrawTitleMenuButton(new Rect(x + 128f, y + 286f + offset, width - 256f, 32f), resumeSnapshot == null ? 3 : 4, "設定・アクセシビリティ")) { titlePage = TitlePage.Settings; settingsMenuIndex = 0; }
+            if (DrawTitleMenuButton(new Rect(x + 128f, y + 326f + offset, width - 256f, 32f), resumeSnapshot == null ? 4 : 5, "冒険の記録")) { titlePage = TitlePage.Profile; profileDifficulty = SelectedDifficulty; profileMenuIndex = 0; }
+            if (DrawTitleMenuButton(new Rect(x + 128f, y + 366f + offset, width - 256f, 28f), resumeSnapshot == null ? 5 : 6, "ゲームを終了")) QuitGame();
 
             GUI.color = AccentColor;
-            GUI.Label(new Rect(x, y + 374f, width, 22f), "最高スコア  " + PlayerProfile.BestScore + "     クリア  " + PlayerProfile.ClearCount + "     最多  " + PlayerProfile.FurthestShardCount + " / " + GameRules.ShardGoal, bodyCenterStyle);
+            GUI.Label(new Rect(x, y + 408f + offset, width, 22f), GameRules.DifficultyName(SelectedDifficulty) + "  最高 " + PlayerProfile.BestScoreFor(SelectedDifficulty) + "     クリア " + PlayerProfile.ClearCountFor(SelectedDifficulty) + "     最多 " + PlayerProfile.FurthestShardCount + " / " + GameRules.ShardGoal, bodyCenterStyle);
             GUI.color = PrimaryTextColor;
-            GUI.Label(new Rect(x, y + 406f, width, 22f), "矢印キー / D-padで選択  •  Enter / Aで決定", subtleCenterStyle);
+            GUI.Label(new Rect(x, y + 442f + offset, width, 22f), "矢印キー / D-padで選択  •  Enter / Aで決定", subtleCenterStyle);
+            GUI.Label(new Rect(x, y + 472f + offset, width, 18f), "v" + ProductVersion + "  •  オフライン保存  •  Esc / Bで戻る", subtleCenterStyle);
         }
 
         private void DrawHowTo(float x, float y, float width)
@@ -399,8 +563,8 @@ namespace VerdantBlade
             var lines = new[]
             {
                 "1. 設定した移動キー、矢印キー、または左スティックで移動します。",
-                "2. " + GameInput.BindingLabel(GameAction.Attack) + "、Z、左クリック、またはAで攻撃します。",
-                "3. " + GameInput.BindingLabel(GameAction.Dash) + "、X、右クリック、またはBでダッシュします。",
+                "2. " + GameInput.BindingLabel(GameAction.Attack) + "、Z、左クリック、または" + GameInput.GamepadHintLabel(GameAction.Attack) + "で攻撃します。",
+                "3. " + GameInput.BindingLabel(GameAction.Dash) + "、X、右クリック、または" + GameInput.GamepadHintLabel(GameAction.Dash) + "でダッシュします。",
                 "4. 壺を壊し、ライフブルームを拾うとライフが回復します。",
                 "5. 金色のコンパスは、いつでも次の目的地を指します。"
             };
@@ -420,53 +584,85 @@ namespace VerdantBlade
                 DrawBindings(x, y, width, fromTitle);
                 return;
             }
+            if (gamepadBindingsOpen)
+            {
+                DrawGamepadBindings(x, y, width, fromTitle);
+                return;
+            }
 
-            GUI.Label(new Rect(x + 42f, y + 112f, width - 84f, 25f), "設定はこの端末に自動保存されます。", bodyCenterStyle);
+            GUI.Label(new Rect(x + 42f, y + 108f, width - 84f, 25f), "設定はこの端末に自動保存されます。", bodyCenterStyle);
             var buttonX = x + 42f;
             var buttonWidth = width - 84f;
-            if (DrawButton(new Rect(buttonX, y + 150f, 84f, 32f), "効果音 −")) SetSfxVolume(SfxVolume - 0.1f);
-            GUI.Label(new Rect(buttonX + 88f, y + 150f, buttonWidth - 176f, 32f), "効果音  " + Mathf.RoundToInt(SfxVolume * 100f) + "%", bodyCenterStyle);
-            if (DrawButton(new Rect(buttonX + buttonWidth - 84f, y + 150f, 84f, 32f), "効果音 ＋")) SetSfxVolume(SfxVolume + 0.1f);
-            if (DrawButton(new Rect(buttonX, y + 188f, buttonWidth, 30f), "点滅を抑える     " + OnOff(ReduceFlashing) + "     [F]")) ToggleReducedFlashing();
-            if (DrawButton(new Rect(buttonX, y + 224f, buttonWidth, 30f), "画面の揺れ     " + OnOff(ScreenShakeEnabled) + "     [C]")) ToggleScreenShake();
-            if (DrawButton(new Rect(buttonX, y + 260f, buttonWidth, 30f), "高コントラストHUD     " + OnOff(HighContrast) + "     [H]")) ToggleHighContrast();
-            if (DrawButton(new Rect(buttonX, y + 296f, buttonWidth, 30f), "文字を大きくする     " + OnOff(LargeText) + "     [T]")) ToggleLargeText();
-            if (DrawButton(new Rect(buttonX, y + 332f, buttonWidth, 30f), "キーボード操作")) bindingsOpen = true;
-            GUI.color = PrimaryTextColor;
-            GUI.Label(new Rect(x + 42f, y + 370f, width - 84f, 30f), "点滅・揺れはすぐに反映されます。難易度はタイトル画面で選択します。", subtleCenterStyle);
-            if (!string.IsNullOrEmpty(settingsNotice)) GUI.Label(new Rect(x + 42f, y + 396f, width - 84f, 18f), settingsNotice, subtleCenterStyle);
-            if (DrawButton(new Rect(x + 180f, y + 430f, width - 360f, 28f), fromTitle ? "戻る" : "ポーズへ戻る"))
+            var smallButtonWidth = 92f;
+            if (DrawMenuButton(new Rect(buttonX, y + 144f, smallButtonWidth, 30f), 0, settingsMenuIndex, "効果音 −")) { settingsMenuIndex = 0; SetSfxVolume(SfxVolume - 0.1f); }
+            GUI.Label(new Rect(buttonX + smallButtonWidth + 4f, y + 144f, buttonWidth - smallButtonWidth * 2f - 8f, 30f), "効果音  " + Mathf.RoundToInt(SfxVolume * 100f) + "%", bodyCenterStyle);
+            if (DrawMenuButton(new Rect(buttonX + buttonWidth - smallButtonWidth, y + 144f, smallButtonWidth, 30f), 1, settingsMenuIndex, "効果音 ＋")) { settingsMenuIndex = 1; SetSfxVolume(SfxVolume + 0.1f); }
+            if (DrawMenuButton(new Rect(buttonX, y + 180f, smallButtonWidth, 30f), 2, settingsMenuIndex, "音楽 −")) { settingsMenuIndex = 2; SetMusicVolume(MusicVolume - 0.1f); }
+            GUI.Label(new Rect(buttonX + smallButtonWidth + 4f, y + 180f, buttonWidth - smallButtonWidth * 2f - 8f, 30f), "音楽  " + Mathf.RoundToInt(MusicVolume * 100f) + "%", bodyCenterStyle);
+            if (DrawMenuButton(new Rect(buttonX + buttonWidth - smallButtonWidth, y + 180f, smallButtonWidth, 30f), 3, settingsMenuIndex, "音楽 ＋")) { settingsMenuIndex = 3; SetMusicVolume(MusicVolume + 0.1f); }
+            if (DrawMenuButton(new Rect(buttonX, y + 216f, buttonWidth, 28f), 4, settingsMenuIndex, "表示モード     " + DisplayModeLabel(SelectedDisplayMode))) { settingsMenuIndex = 4; CycleDisplayMode(); }
+            if (DrawMenuButton(new Rect(buttonX, y + 248f, buttonWidth, 28f), 5, settingsMenuIndex, "解像度     " + ResolutionLabel())) { settingsMenuIndex = 5; CycleResolution(); }
+            if (DrawMenuButton(new Rect(buttonX, y + 280f, buttonWidth, 28f), 6, settingsMenuIndex, "垂直同期     " + OnOff(VSyncEnabled))) { settingsMenuIndex = 6; ToggleVSync(); }
+            if (DrawMenuButton(new Rect(buttonX, y + 312f, buttonWidth, 28f), 7, settingsMenuIndex, "点滅を抑える     " + OnOff(ReduceFlashing) + "     [F]")) { settingsMenuIndex = 7; ToggleReducedFlashing(); }
+            if (DrawMenuButton(new Rect(buttonX, y + 344f, buttonWidth, 28f), 8, settingsMenuIndex, "画面の揺れ     " + OnOff(ScreenShakeEnabled) + "     [C]")) { settingsMenuIndex = 8; ToggleScreenShake(); }
+            if (DrawMenuButton(new Rect(buttonX, y + 376f, buttonWidth, 28f), 9, settingsMenuIndex, "高コントラストHUD     " + OnOff(HighContrast) + "     [H]")) { settingsMenuIndex = 9; ToggleHighContrast(); }
+            if (DrawMenuButton(new Rect(buttonX, y + 408f, buttonWidth, 28f), 10, settingsMenuIndex, "文字を大きくする     " + OnOff(LargeText) + "     [T]")) { settingsMenuIndex = 10; ToggleLargeText(); }
+            if (DrawMenuButton(new Rect(buttonX, y + 440f, buttonWidth, 28f), 11, settingsMenuIndex, "キーボード操作を変更")) { settingsMenuIndex = 11; bindingsOpen = true; keyboardBindingsMenuIndex = 0; }
+            if (DrawMenuButton(new Rect(buttonX, y + 472f, buttonWidth, 28f), 12, settingsMenuIndex, "ゲームパッド操作を変更")) { settingsMenuIndex = 12; gamepadBindingsOpen = true; gamepadBindingsMenuIndex = 0; }
+            var resetLabel = resetSettingsConfirmation ? "確認：すべての設定と操作を初期状態に戻す" : "設定と操作を初期状態に戻す";
+            if (DrawMenuButton(new Rect(buttonX, y + 504f, buttonWidth, 28f), 13, settingsMenuIndex, resetLabel))
             {
-                bindingsOpen = false;
-                if (fromTitle) titlePage = TitlePage.Main;
-                else pauseSettingsOpen = false;
+                settingsMenuIndex = 13;
+                if (resetSettingsConfirmation) { resetSettingsConfirmation = false; ResetAllSettings(); }
+                else { resetSettingsConfirmation = true; settingsNotice = "もう一度押すと設定と操作を初期状態に戻します。"; }
+            }
+            GUI.color = PrimaryTextColor;
+            GUI.Label(new Rect(x + 42f, y + 538f, width - 84f, 20f), "難易度はタイトルで選択。変更はすぐに保存されます。", subtleCenterStyle);
+            if (!string.IsNullOrEmpty(settingsNotice)) GUI.Label(new Rect(x + 42f, y + 560f, width - 84f, 20f), settingsNotice, subtleCenterStyle);
+            if (DrawMenuButton(new Rect(x + 180f, y + 588f, width - 360f, 28f), 14, settingsMenuIndex, fromTitle ? "戻る" : "ポーズへ戻る"))
+            {
+                settingsMenuIndex = 14;
+                CloseSettings(fromTitle);
             }
         }
 
         private void DrawProfile(float x, float y, float width)
         {
+            if (profileAchievementsOpen)
+            {
+                DrawAchievementDetails(x, y, width);
+                return;
+            }
             GUI.Label(new Rect(x + 42f, y + 114f, width - 84f, 24f), "冒険の記録", centerStyle);
-            GUI.Label(new Rect(x + 72f, y + 153f, width - 144f, 22f), "挑戦  " + PlayerProfile.AttemptCount + "      クリア  " + PlayerProfile.ClearCount + "      最高  " + PlayerProfile.BestScore, bodyStyle);
-            GUI.Label(new Rect(x + 72f, y + 179f, width - 144f, 22f), "欠片  " + PlayerProfile.TotalShardsCollected + "      敵  " + PlayerProfile.TotalEnemiesDefeated + "      壺  " + PlayerProfile.TotalPotsBroken, bodyStyle);
-            var fastest = PlayerProfile.BestClearTime < 0f ? "--:--" : FormatTime(PlayerProfile.BestClearTime);
-            GUI.Label(new Rect(x + 72f, y + 205f, width - 144f, 22f), "最速クリア  " + fastest + "      被ダメージ  " + PlayerProfile.TotalDamageTaken, bodyStyle);
+            if (DrawMenuButton(new Rect(x + 116f, y + 148f, width - 232f, 30f), 0, profileMenuIndex, "記録の難易度     " + GameRules.DifficultyName(profileDifficulty)))
+            {
+                profileMenuIndex = 0;
+                profileDifficulty = GameRules.NextDifficulty(profileDifficulty);
+            }
+            GUI.Label(new Rect(x + 72f, y + 190f, width - 144f, 22f), "挑戦  " + PlayerProfile.AttemptCountFor(profileDifficulty) + "      クリア  " + PlayerProfile.ClearCountFor(profileDifficulty) + "      最高  " + PlayerProfile.BestScoreFor(profileDifficulty), bodyStyle);
+            GUI.Label(new Rect(x + 72f, y + 216f, width - 144f, 22f), "欠片  " + PlayerProfile.TotalShardsCollected + "      敵  " + PlayerProfile.TotalEnemiesDefeated + "      壺  " + PlayerProfile.TotalPotsBroken, bodyStyle);
+            var fastest = PlayerProfile.BestClearTimeFor(profileDifficulty) < 0f ? "--:--" : FormatTime(PlayerProfile.BestClearTimeFor(profileDifficulty));
+            GUI.Label(new Rect(x + 72f, y + 242f, width - 144f, 22f), "最速クリア  " + fastest + "      被ダメージ  " + PlayerProfile.TotalDamageTaken, bodyStyle);
 
             GUI.color = AccentColor;
-            GUI.Label(new Rect(x + 42f, y + 248f, width - 84f, 22f), "実績  " + UnlockedAchievementCount() + " / " + AchievementIds.Length, bodyCenterStyle);
+            GUI.Label(new Rect(x + 42f, y + 278f, width - 84f, 22f), "実績  " + UnlockedAchievementCount() + " / " + AchievementIds.Length + "     中断 " + PlayerProfile.AbandonedCount, bodyCenterStyle);
             GUI.color = PrimaryTextColor;
-            GUI.Label(new Rect(x + 72f, y + 276f, width - 144f, 22f), AchievementProgressText(), subtleCenterStyle);
+            if (DrawMenuButton(new Rect(x + 116f, y + 308f, width - 232f, 30f), 1, profileMenuIndex, "実績一覧と解除条件を見る"))
+            {
+                profileMenuIndex = 1;
+                profileAchievementsOpen = true;
+            }
             if (!string.IsNullOrEmpty(profileNotice))
             {
                 GUI.color = new Color(1f, 0.74f, 0.48f);
-                GUI.Label(new Rect(x + 42f, y + 306f, width - 84f, 22f), profileNotice, subtleCenterStyle);
+                GUI.Label(new Rect(x + 42f, y + 348f, width - 84f, 22f), profileNotice, subtleCenterStyle);
             }
-            if (DrawButton(new Rect(x + 72f, y + 344f, width - 144f, 30f), resetConfirmation ? "確認：冒険の記録を消去する" : "冒険の記録をリセット"))
+            if (DrawMenuButton(new Rect(x + 72f, y + 382f, width - 144f, 30f), 2, profileMenuIndex, resetConfirmation ? "確認：冒険の記録を消去する" : "冒険の記録をリセット"))
             {
+                profileMenuIndex = 2;
                 if (resetConfirmation)
                 {
-                    PlayerProfile.ResetProgress();
-                    resetConfirmation = false;
-                    profileNotice = "冒険の記録を消去しました。設定は保持されています。";
+                    ResetProgressAndReload();
                 }
                 else
                 {
@@ -474,11 +670,34 @@ namespace VerdantBlade
                     profileNotice = "もう一度押すと消去します。この操作は元に戻せません。";
                 }
             }
-            if (DrawButton(new Rect(x + 180f, y + 410f, width - 360f, 32f), "戻る"))
+            if (DrawMenuButton(new Rect(x + 180f, y + 432f, width - 360f, 32f), 3, profileMenuIndex, "戻る"))
             {
-                resetConfirmation = false;
-                titlePage = TitlePage.Main;
+                profileMenuIndex = 3;
+                ReturnToTitleMain();
             }
+        }
+
+        private void DrawAchievementDetails(float x, float y, float width)
+        {
+            GUI.Label(new Rect(x + 42f, y + 112f, width - 84f, 28f), "実績一覧", titleCenterStyle);
+            for (var index = 0; index < AchievementIds.Length; index++)
+            {
+                var column = index / 4;
+                var row = index % 4;
+                var cardWidth = (width - 104f) * 0.5f;
+                var cardX = x + 42f + column * (cardWidth + 20f);
+                var cardY = y + 164f + row * 72f;
+                var unlocked = PlayerProfile.IsAchievementUnlocked(AchievementIds[index]);
+                GUI.color = unlocked ? new Color(0.17f, 0.34f, 0.23f, 0.96f) : PanelColor(0.84f);
+                GUI.Box(new Rect(cardX, cardY, cardWidth, 60f), GUIContent.none);
+                GUI.color = unlocked ? AccentColor : PrimaryTextColor;
+                GUI.Label(new Rect(cardX + 12f, cardY + 5f, cardWidth - 24f, 21f), (unlocked ? "解除済  " : "未解除  ") + AchievementName(AchievementIds[index]), bodyStyle);
+                GUI.color = PrimaryTextColor;
+                GUI.Label(new Rect(cardX + 12f, cardY + 28f, cardWidth - 24f, 25f), AchievementDescription(AchievementIds[index]), subtleStyle);
+            }
+            GUI.color = PrimaryTextColor;
+            GUI.Label(new Rect(x + 42f, y + 468f, width - 84f, 22f), "B / Esc / Enter / A で戻る", subtleCenterStyle);
+            if (DrawButton(new Rect(x + 180f, y + 500f, width - 360f, 30f), "戻る")) profileAchievementsOpen = false;
         }
 
         private void DrawGuidance()
@@ -486,19 +705,19 @@ namespace VerdantBlade
             var message = Time.unscaledTime < toastEndsAt ? toastMessage : ContextHint();
             if (string.IsNullOrEmpty(message)) return;
             GUI.color = PanelColor(0.82f);
-            GUI.Box(new Rect(Screen.width * 0.5f - 245f, Screen.height - 68f, 490f, 40f), GUIContent.none);
+            GUI.Box(new Rect(ViewWidth * 0.5f - 245f, ViewHeight - 68f, 490f, 40f), GUIContent.none);
             GUI.color = PrimaryTextColor;
-            GUI.Label(new Rect(Screen.width * 0.5f - 235f, Screen.height - 63f, 470f, 29f), message, bodyCenterStyle);
+            GUI.Label(new Rect(ViewWidth * 0.5f - 235f, ViewHeight - 63f, 470f, 29f), message, bodyCenterStyle);
         }
 
         private void DrawPauseScreen()
         {
             GUI.color = new Color(0.01f, 0.03f, 0.025f, 0.77f);
-            GUI.Box(new Rect(0f, 0f, Screen.width, Screen.height), GUIContent.none);
-            var width = Mathf.Min(500f, Screen.width - 36f);
-            var x = (Screen.width - width) * 0.5f;
-            var panelHeight = pauseSettingsOpen ? 430f : 390f;
-            var y = Mathf.Max(32f, (Screen.height - panelHeight) * 0.5f);
+            GUI.Box(new Rect(0f, 0f, ViewWidth, ViewHeight), GUIContent.none);
+            var width = Mathf.Min(500f, ViewWidth - 36f);
+            var x = (ViewWidth - width) * 0.5f;
+            var panelHeight = pauseSettingsOpen ? 650f : 430f;
+            var y = Mathf.Max(32f, (ViewHeight - panelHeight) * 0.5f);
             GUI.color = PanelColor(0.98f);
             GUI.Box(new Rect(x, y, width, panelHeight), GUIContent.none);
             GUI.color = AccentColor;
@@ -511,24 +730,25 @@ namespace VerdantBlade
             }
 
             GUI.Label(new Rect(x, y + 64f, width, 24f), pausedByFocusLoss ? "アプリが非アクティブになったため、安全にポーズしました。" : "冒険は安全にポーズされています。", bodyCenterStyle);
-            if (DrawButton(new Rect(x + 92f, y + 112f, width - 184f, 34f), "再開  [ESC / P]")) TogglePause();
-            if (DrawButton(new Rect(x + 92f, y + 154f, width - 184f, 30f), "設定・アクセシビリティ")) pauseSettingsOpen = true;
-            if (DrawButton(new Rect(x + 92f, y + 194f, width - 184f, 30f), "最初からやり直す")) RestartRun();
-            if (DrawButton(new Rect(x + 92f, y + 234f, width - 184f, 30f), "タイトルへ戻る")) ReturnToTitle();
+            if (DrawMenuButton(new Rect(x + 92f, y + 112f, width - 184f, 34f), 0, pauseMenuIndex, "再開  [ESC / P]")) { pauseMenuIndex = 0; TogglePause(); }
+            if (DrawMenuButton(new Rect(x + 92f, y + 154f, width - 184f, 30f), 1, pauseMenuIndex, "設定・アクセシビリティ")) { pauseMenuIndex = 1; pauseSettingsOpen = true; settingsMenuIndex = 0; }
+            if (DrawMenuButton(new Rect(x + 92f, y + 194f, width - 184f, 30f), 2, pauseMenuIndex, "最初からやり直す")) { pauseMenuIndex = 2; RestartRun(); }
+            if (DrawMenuButton(new Rect(x + 92f, y + 234f, width - 184f, 30f), 3, pauseMenuIndex, "中断してタイトルへ")) { pauseMenuIndex = 3; ReturnToTitle(); }
+            if (DrawMenuButton(new Rect(x + 92f, y + 274f, width - 184f, 28f), 4, pauseMenuIndex, "ゲームを終了")) { pauseMenuIndex = 4; QuitGame(); }
             GUI.color = PrimaryTextColor;
-            GUI.Label(new Rect(x + 38f, y + 286f, width - 76f, 22f), "目的：" + ObjectiveText().Replace("目的：", string.Empty), subtleCenterStyle);
-            GUI.Label(new Rect(x + 38f, y + 313f, width - 76f, 22f), "今回のスコア " + CurrentScore + "  •  敵 " + EnemiesDefeated + "  •  被ダメージ " + DamageTaken, subtleCenterStyle);
+            GUI.Label(new Rect(x + 38f, y + 326f, width - 76f, 22f), "目的：" + ObjectiveText().Replace("目的：", string.Empty), subtleCenterStyle);
+            GUI.Label(new Rect(x + 38f, y + 353f, width - 76f, 22f), "今回のスコア " + CurrentScore + "  •  敵 " + EnemiesDefeated + "  •  被ダメージ " + DamageTaken, subtleCenterStyle);
         }
 
         private void DrawResultScreen()
         {
             GUI.color = new Color(0.01f, 0.03f, 0.025f, 0.82f);
-            GUI.Box(new Rect(0f, 0f, Screen.width, Screen.height), GUIContent.none);
-            var width = Mathf.Min(540f, Screen.width - 36f);
-            var x = (Screen.width - width) * 0.5f;
-            var y = Mathf.Max(28f, (Screen.height - 402f) * 0.5f);
+            GUI.Box(new Rect(0f, 0f, ViewWidth, ViewHeight), GUIContent.none);
+            var width = Mathf.Min(540f, ViewWidth - 36f);
+            var x = (ViewWidth - width) * 0.5f;
+            var y = Mathf.Max(28f, (ViewHeight - 440f) * 0.5f);
             GUI.color = PanelColor(0.98f);
-            GUI.Box(new Rect(x, y, width, 402f), GUIContent.none);
+            GUI.Box(new Rect(x, y, width, 440f), GUIContent.none);
             GUI.color = won ? AccentColor : new Color(1f, 0.48f, 0.46f);
             GUI.Label(new Rect(x, y + 18f, width, 34f), won ? "古代の門が目覚めた" : "森は静寂に包まれた", centerStyle);
             GUI.color = PrimaryTextColor;
@@ -536,12 +756,13 @@ namespace VerdantBlade
             GUI.Label(new Rect(x + 48f, y + 94f, width - 96f, 22f), "スコア  " + CurrentScore + (newBestScore ? "    自己ベスト！" : string.Empty), bodyStyle);
             GUI.Label(new Rect(x + 48f, y + 120f, width - 96f, 22f), "時間  " + FormatTime(ElapsedRunSeconds) + "    " + GameRules.DifficultyName(SelectedDifficulty) + "    フロー " + ComboBonus, bodyStyle);
             GUI.Label(new Rect(x + 48f, y + 146f, width - 96f, 22f), "敵  " + EnemiesDefeated + "    壺  " + PotsBroken + "    被ダメージ  " + DamageTaken, bodyStyle);
-            GUI.Label(new Rect(x + 48f, y + 172f, width - 96f, 22f), "最高スコア  " + PlayerProfile.BestScore + "    クリア  " + PlayerProfile.ClearCount, bodyStyle);
-            var fastest = PlayerProfile.BestClearTime < 0f ? "--:--" : FormatTime(PlayerProfile.BestClearTime);
+            GUI.Label(new Rect(x + 48f, y + 172f, width - 96f, 22f), "最高スコア  " + PlayerProfile.BestScoreFor(SelectedDifficulty) + "    クリア  " + PlayerProfile.ClearCountFor(SelectedDifficulty), bodyStyle);
+            var fastest = PlayerProfile.BestClearTimeFor(SelectedDifficulty) < 0f ? "--:--" : FormatTime(PlayerProfile.BestClearTimeFor(SelectedDifficulty));
             GUI.Label(new Rect(x + 48f, y + 198f, width - 96f, 22f), "最速クリア  " + fastest, bodyStyle);
             DrawNewAchievements(x, y + 236f, width);
-            if (DrawButton(new Rect(x + 80f, y + 332f, width - 160f, 32f), "もう一度あそぶ  [R / ENTER]")) RestartRun();
-            if (DrawButton(new Rect(x + 80f, y + 370f, width - 160f, 24f), "タイトルへ戻る")) ReturnToTitle();
+            if (DrawMenuButton(new Rect(x + 80f, y + 332f, width - 160f, 32f), 0, resultMenuIndex, "もう一度あそぶ  [R / ENTER]")) { resultMenuIndex = 0; RestartRun(); }
+            if (DrawMenuButton(new Rect(x + 80f, y + 370f, width - 160f, 28f), 1, resultMenuIndex, "タイトルへ戻る")) { resultMenuIndex = 1; ReturnToTitle(); }
+            if (DrawMenuButton(new Rect(x + 80f, y + 404f, width - 160f, 24f), 2, resultMenuIndex, "ゲームを終了")) { resultMenuIndex = 2; QuitGame(); }
         }
 
         private void DrawNewAchievements(float x, float y, float width)
@@ -570,39 +791,88 @@ namespace VerdantBlade
             GUI.Label(new Rect(buttonX, y + 112f, buttonWidth, 28f), waitingText, bodyCenterStyle);
             GUI.color = PrimaryTextColor;
 
-            DrawBindingButton(new Rect(buttonX, y + 150f, columnWidth, 30f), GameAction.MoveUp);
-            DrawBindingButton(new Rect(buttonX + columnWidth + 8f, y + 150f, columnWidth, 30f), GameAction.MoveDown);
-            DrawBindingButton(new Rect(buttonX, y + 186f, columnWidth, 30f), GameAction.MoveLeft);
-            DrawBindingButton(new Rect(buttonX + columnWidth + 8f, y + 186f, columnWidth, 30f), GameAction.MoveRight);
-            DrawBindingButton(new Rect(buttonX, y + 222f, columnWidth, 30f), GameAction.Attack);
-            DrawBindingButton(new Rect(buttonX + columnWidth + 8f, y + 222f, columnWidth, 30f), GameAction.Dash);
-            DrawBindingButton(new Rect(buttonX, y + 258f, buttonWidth, 30f), GameAction.Pause);
+            DrawBindingButton(new Rect(buttonX, y + 150f, columnWidth, 30f), GameAction.MoveUp, 0);
+            DrawBindingButton(new Rect(buttonX + columnWidth + 8f, y + 150f, columnWidth, 30f), GameAction.MoveDown, 1);
+            DrawBindingButton(new Rect(buttonX, y + 186f, columnWidth, 30f), GameAction.MoveLeft, 2);
+            DrawBindingButton(new Rect(buttonX + columnWidth + 8f, y + 186f, columnWidth, 30f), GameAction.MoveRight, 3);
+            DrawBindingButton(new Rect(buttonX, y + 222f, columnWidth, 30f), GameAction.Attack, 4);
+            DrawBindingButton(new Rect(buttonX + columnWidth + 8f, y + 222f, columnWidth, 30f), GameAction.Dash, 5);
+            DrawBindingButton(new Rect(buttonX, y + 258f, buttonWidth, 30f), GameAction.Pause, 6);
 
             if (pendingBinding != GameAction.None && DrawButton(new Rect(buttonX, y + 300f, buttonWidth, 28f), "割り当てを中止"))
             {
                 pendingBinding = GameAction.None;
                 settingsNotice = "キーの割り当てを中止しました。";
             }
-            if (DrawButton(new Rect(buttonX, y + 340f, buttonWidth, 28f), "初期設定に戻す"))
+            if (DrawMenuButton(new Rect(buttonX, y + 340f, buttonWidth, 28f), 7, keyboardBindingsMenuIndex, "初期設定に戻す"))
             {
+                keyboardBindingsMenuIndex = 7;
                 GameInput.ResetBindings();
                 pendingBinding = GameAction.None;
                 settingsNotice = "キー設定を初期状態に戻しました。";
             }
             if (!string.IsNullOrEmpty(settingsNotice)) GUI.Label(new Rect(buttonX, y + 374f, buttonWidth, 20f), settingsNotice, subtleCenterStyle);
-            if (DrawButton(new Rect(x + 180f, y + 414f, width - 360f, 28f), fromTitle ? "設定に戻る" : "ポーズ設定に戻る"))
+            if (DrawMenuButton(new Rect(x + 180f, y + 414f, width - 360f, 28f), 8, keyboardBindingsMenuIndex, fromTitle ? "設定に戻る" : "ポーズ設定に戻る"))
             {
+                keyboardBindingsMenuIndex = 8;
                 pendingBinding = GameAction.None;
                 bindingsOpen = false;
             }
         }
 
-        private void DrawBindingButton(Rect rect, GameAction action)
+        private void DrawBindingButton(Rect rect, GameAction action, int index)
         {
             var prefix = pendingBinding == action ? "入力待機中  " : string.Empty;
-            if (DrawButton(rect, prefix + ActionLabel(action) + "  " + GameInput.BindingLabel(action)))
+            if (DrawMenuButton(rect, index, keyboardBindingsMenuIndex, prefix + ActionLabel(action) + "  " + GameInput.BindingLabel(action)))
             {
+                keyboardBindingsMenuIndex = index;
                 pendingBinding = action;
+                settingsNotice = string.Empty;
+            }
+        }
+
+        private void DrawGamepadBindings(float x, float y, float width, bool fromTitle)
+        {
+            var buttonX = x + 42f;
+            var buttonWidth = width - 84f;
+            var waitingText = pendingGamepadBinding == GameAction.None
+                ? "変更する操作を選び、ゲームパッドのボタンを押してください。"
+                : "「" + ActionLabel(pendingGamepadBinding) + "」に割り当てるボタンを押してください。";
+            GUI.color = pendingGamepadBinding == GameAction.None ? PrimaryTextColor : AccentColor;
+            GUI.Label(new Rect(buttonX, y + 112f, buttonWidth, 36f), waitingText, bodyCenterStyle);
+            GUI.color = PrimaryTextColor;
+
+            DrawGamepadBindingButton(new Rect(buttonX, y + 164f, buttonWidth, 32f), GameAction.Attack, 0);
+            DrawGamepadBindingButton(new Rect(buttonX, y + 204f, buttonWidth, 32f), GameAction.Dash, 1);
+            DrawGamepadBindingButton(new Rect(buttonX, y + 244f, buttonWidth, 32f), GameAction.Pause, 2);
+            if (pendingGamepadBinding != GameAction.None && DrawButton(new Rect(buttonX, y + 286f, buttonWidth, 28f), "割り当てを中止"))
+            {
+                pendingGamepadBinding = GameAction.None;
+                settingsNotice = "ゲームパッドの割り当てを中止しました。";
+            }
+            if (DrawMenuButton(new Rect(buttonX, y + 332f, buttonWidth, 28f), 3, gamepadBindingsMenuIndex, "初期設定に戻す"))
+            {
+                gamepadBindingsMenuIndex = 3;
+                GameInput.ResetGamepadBindings();
+                pendingGamepadBinding = GameAction.None;
+                settingsNotice = "ゲームパッド設定を初期状態に戻しました。";
+            }
+            if (!string.IsNullOrEmpty(settingsNotice)) GUI.Label(new Rect(buttonX, y + 370f, buttonWidth, 20f), settingsNotice, subtleCenterStyle);
+            if (DrawMenuButton(new Rect(x + 180f, y + 414f, width - 360f, 28f), 4, gamepadBindingsMenuIndex, fromTitle ? "設定に戻る" : "ポーズ設定に戻る"))
+            {
+                gamepadBindingsMenuIndex = 4;
+                pendingGamepadBinding = GameAction.None;
+                gamepadBindingsOpen = false;
+            }
+        }
+
+        private void DrawGamepadBindingButton(Rect rect, GameAction action, int index)
+        {
+            var prefix = pendingGamepadBinding == action ? "入力待機中  " : string.Empty;
+            if (DrawMenuButton(rect, index, gamepadBindingsMenuIndex, prefix + ActionLabel(action) + "  " + GameInput.GamepadBindingLabel(action)))
+            {
+                gamepadBindingsMenuIndex = index;
+                pendingGamepadBinding = action;
                 settingsNotice = string.Empty;
             }
         }
@@ -619,6 +889,18 @@ namespace VerdantBlade
             return DrawButton(rect, (titleMenuIndex == index ? ">  " : string.Empty) + label);
         }
 
+        private bool DrawMenuButton(Rect rect, int index, int selectedIndex, string label)
+        {
+            if (selectedIndex == index)
+            {
+                var previousColor = GUI.color;
+                GUI.color = new Color(AccentColor.r, AccentColor.g, AccentColor.b, 0.46f);
+                GUI.Box(new Rect(rect.x - 4f, rect.y - 3f, rect.width + 8f, rect.height + 6f), GUIContent.none);
+                GUI.color = previousColor;
+            }
+            return DrawButton(rect, (selectedIndex == index ? ">  " : string.Empty) + label);
+        }
+
         private bool DrawButton(Rect rect, string text)
         {
             // GUI.color tints both the button background and its label. Keep it white here
@@ -627,7 +909,8 @@ namespace VerdantBlade
             var previousBackground = GUI.backgroundColor;
             var previousContent = GUI.contentColor;
             GUI.color = Color.white;
-            var hovered = Event.current != null && rect.Contains(Event.current.mousePosition);
+            var pointer = Event.current == null ? Vector2.zero : (Event.current.mousePosition - uiOffset) / uiScale;
+            var hovered = Event.current != null && rect.Contains(pointer);
             GUI.backgroundColor = HighContrast
                 ? (hovered ? new Color(0.38f, 0.46f, 0.31f, 1f) : new Color(0.26f, 0.31f, 0.23f, 1f))
                 : (hovered ? new Color(0.27f, 0.43f, 0.3f, 1f) : new Color(0.18f, 0.3f, 0.21f, 1f));
@@ -640,20 +923,276 @@ namespace VerdantBlade
             return clicked;
         }
 
+        private void HandleTitleInput()
+        {
+            if (titlePage == TitlePage.Main)
+            {
+                HandleTitleMenuInput();
+                return;
+            }
+            if (titlePage == TitlePage.HowTo)
+            {
+                if (GameInput.MenuBackPressed || GameInput.MenuConfirmPressed) ReturnToTitleMain();
+                return;
+            }
+            if (titlePage == TitlePage.Profile)
+            {
+                HandleProfileInput();
+                return;
+            }
+            HandleSettingsInput(true);
+        }
+
         private void HandleTitleMenuInput()
         {
-            if (GameInput.MenuUpPressed) titleMenuIndex = (titleMenuIndex + 4) % 5;
-            if (GameInput.MenuDownPressed) titleMenuIndex = (titleMenuIndex + 1) % 5;
-            if (!GameInput.MenuConfirmPressed) return;
+            var itemCount = resumeSnapshot == null ? 6 : 7;
+            var confirm = MoveMenuSelection(ref titleMenuIndex, itemCount);
+            if (!confirm) return;
+
+            if (resumeSnapshot == null)
+            {
+                switch (titleMenuIndex)
+                {
+                    case 0: CycleDifficulty(); break;
+                    case 1: StartFreshRun(); break;
+                    case 2: titlePage = TitlePage.HowTo; break;
+                    case 3: titlePage = TitlePage.Settings; settingsMenuIndex = 0; break;
+                    case 4: titlePage = TitlePage.Profile; profileMenuIndex = 0; profileDifficulty = SelectedDifficulty; break;
+                    case 5: QuitGame(); break;
+                }
+                return;
+            }
 
             switch (titleMenuIndex)
             {
                 case 0: CycleDifficulty(); break;
-                case 1: StartRun(); break;
-                case 2: titlePage = TitlePage.HowTo; break;
-                case 3: titlePage = TitlePage.Settings; break;
-                case 4: titlePage = TitlePage.Profile; break;
+                case 1: ResumeRun(); break;
+                case 2: StartFreshRun(); break;
+                case 3: titlePage = TitlePage.HowTo; break;
+                case 4: titlePage = TitlePage.Settings; settingsMenuIndex = 0; break;
+                case 5: titlePage = TitlePage.Profile; profileMenuIndex = 0; profileDifficulty = SelectedDifficulty; break;
+                case 6: QuitGame(); break;
             }
+        }
+
+        private void HandleSettingsInput(bool fromTitle)
+        {
+            if (bindingsOpen)
+            {
+                HandleKeyboardBindingsInput(fromTitle);
+                return;
+            }
+            if (gamepadBindingsOpen)
+            {
+                HandleGamepadBindingsInput(fromTitle);
+                return;
+            }
+            HandleSettingsShortcuts();
+            if (GameInput.MenuBackPressed)
+            {
+                CloseSettings(fromTitle);
+                return;
+            }
+            if (!MoveMenuSelection(ref settingsMenuIndex, 15)) return;
+            switch (settingsMenuIndex)
+            {
+                case 0: SetSfxVolume(SfxVolume - 0.1f); break;
+                case 1: SetSfxVolume(SfxVolume + 0.1f); break;
+                case 2: SetMusicVolume(MusicVolume - 0.1f); break;
+                case 3: SetMusicVolume(MusicVolume + 0.1f); break;
+                case 4: CycleDisplayMode(); break;
+                case 5: CycleResolution(); break;
+                case 6: ToggleVSync(); break;
+                case 7: ToggleReducedFlashing(); break;
+                case 8: ToggleScreenShake(); break;
+                case 9: ToggleHighContrast(); break;
+                case 10: ToggleLargeText(); break;
+                case 11: bindingsOpen = true; keyboardBindingsMenuIndex = 0; break;
+                case 12: gamepadBindingsOpen = true; gamepadBindingsMenuIndex = 0; break;
+                case 13:
+                    if (resetSettingsConfirmation)
+                    {
+                        resetSettingsConfirmation = false;
+                        ResetAllSettings();
+                    }
+                    else
+                    {
+                        resetSettingsConfirmation = true;
+                        settingsNotice = "もう一度決定すると設定と操作を初期状態に戻します。";
+                    }
+                    break;
+                case 14: CloseSettings(fromTitle); break;
+            }
+        }
+
+        private void HandleKeyboardBindingsInput(bool fromTitle)
+        {
+            if (GameInput.MenuBackPressed)
+            {
+                if (pendingBinding != GameAction.None)
+                {
+                    pendingBinding = GameAction.None;
+                    settingsNotice = "キーの割り当てを中止しました。";
+                }
+                else
+                {
+                    bindingsOpen = false;
+                }
+                return;
+            }
+            if (!MoveMenuSelection(ref keyboardBindingsMenuIndex, 9)) return;
+            if (keyboardBindingsMenuIndex <= 6)
+            {
+                pendingBinding = (GameAction)(keyboardBindingsMenuIndex + 1);
+                settingsNotice = string.Empty;
+            }
+            else if (keyboardBindingsMenuIndex == 7)
+            {
+                GameInput.ResetBindings();
+                pendingBinding = GameAction.None;
+                settingsNotice = "キー設定を初期状態に戻しました。";
+            }
+            else
+            {
+                bindingsOpen = false;
+            }
+        }
+
+        private void HandleGamepadBindingsInput(bool fromTitle)
+        {
+            if (GameInput.MenuBackPressed)
+            {
+                if (pendingGamepadBinding != GameAction.None)
+                {
+                    pendingGamepadBinding = GameAction.None;
+                    settingsNotice = "ゲームパッドの割り当てを中止しました。";
+                }
+                else
+                {
+                    gamepadBindingsOpen = false;
+                }
+                return;
+            }
+            if (!MoveMenuSelection(ref gamepadBindingsMenuIndex, 5)) return;
+            if (gamepadBindingsMenuIndex <= 2)
+            {
+                pendingGamepadBinding = gamepadBindingsMenuIndex == 0 ? GameAction.Attack : gamepadBindingsMenuIndex == 1 ? GameAction.Dash : GameAction.Pause;
+                settingsNotice = string.Empty;
+            }
+            else if (gamepadBindingsMenuIndex == 3)
+            {
+                GameInput.ResetGamepadBindings();
+                pendingGamepadBinding = GameAction.None;
+                settingsNotice = "ゲームパッド設定を初期状態に戻しました。";
+            }
+            else
+            {
+                gamepadBindingsOpen = false;
+            }
+        }
+
+        private void HandleProfileInput()
+        {
+            if (profileAchievementsOpen)
+            {
+                if (GameInput.MenuBackPressed || GameInput.MenuConfirmPressed) profileAchievementsOpen = false;
+                return;
+            }
+            if (GameInput.MenuBackPressed)
+            {
+                ReturnToTitleMain();
+                return;
+            }
+            if (!MoveMenuSelection(ref profileMenuIndex, 4)) return;
+            switch (profileMenuIndex)
+            {
+                case 0: profileDifficulty = GameRules.NextDifficulty(profileDifficulty); break;
+                case 1: profileAchievementsOpen = true; break;
+                case 2:
+                    if (resetConfirmation)
+                    {
+                        ResetProgressAndReload();
+                    }
+                    else
+                    {
+                        resetConfirmation = true;
+                        profileNotice = "もう一度決定すると記録を消去します。";
+                    }
+                    break;
+                case 3: ReturnToTitleMain(); break;
+            }
+        }
+
+        private void HandlePauseInput()
+        {
+            if (pauseSettingsOpen)
+            {
+                HandleSettingsInput(false);
+                return;
+            }
+            if (GameInput.MenuBackPressed)
+            {
+                TogglePause();
+                return;
+            }
+            if (!MoveMenuSelection(ref pauseMenuIndex, 5)) return;
+            switch (pauseMenuIndex)
+            {
+                case 0: TogglePause(); break;
+                case 1: pauseSettingsOpen = true; settingsMenuIndex = 0; break;
+                case 2: RestartRun(); break;
+                case 3: ReturnToTitle(); break;
+                case 4: QuitGame(); break;
+            }
+        }
+
+        private void HandleResultInput()
+        {
+            if (GameInput.MenuBackPressed)
+            {
+                ReturnToTitle();
+                return;
+            }
+            if (Input.GetKeyDown(KeyCode.R))
+            {
+                RestartRun();
+                return;
+            }
+            if (!MoveMenuSelection(ref resultMenuIndex, 3)) return;
+            switch (resultMenuIndex)
+            {
+                case 0: RestartRun(); break;
+                case 1: ReturnToTitle(); break;
+                case 2: QuitGame(); break;
+            }
+        }
+
+        private static bool MoveMenuSelection(ref int selectedIndex, int itemCount)
+        {
+            if (GameInput.MenuUpPressed) selectedIndex = (selectedIndex + itemCount - 1) % itemCount;
+            if (GameInput.MenuDownPressed) selectedIndex = (selectedIndex + 1) % itemCount;
+            return GameInput.MenuConfirmPressed;
+        }
+
+        private void CloseSettings(bool fromTitle)
+        {
+            bindingsOpen = false;
+            gamepadBindingsOpen = false;
+            pendingBinding = GameAction.None;
+            pendingGamepadBinding = GameAction.None;
+            resetSettingsConfirmation = false;
+            if (fromTitle) ReturnToTitleMain();
+            else pauseSettingsOpen = false;
+        }
+
+        private void ReturnToTitleMain()
+        {
+            titlePage = TitlePage.Main;
+            bindingsOpen = false;
+            gamepadBindingsOpen = false;
+            profileAchievementsOpen = false;
+            resetConfirmation = false;
+            newRunConfirmation = false;
         }
 
         private bool CapturePendingBinding()
@@ -674,6 +1213,11 @@ namespace VerdantBlade
 
         private void CycleDifficulty()
         {
+            if (resumeSnapshot != null)
+            {
+                ShowToast("続きから再開する冒険の難易度は変更できません。新しい冒険で選択できます。", 3.2f);
+                return;
+            }
             SelectedDifficulty = GameRules.NextDifficulty(SelectedDifficulty);
             PlayerProfile.SaveDifficulty(SelectedDifficulty);
             // The whole encounter is generated while the title is visible, so reload before a run
@@ -733,6 +1277,8 @@ namespace VerdantBlade
         private Font ResolveUiFont()
         {
             if (uiFont != null) return uiFont;
+            var embeddedFont = Resources.Load<Font>("Fonts/NotoSansJP-VF");
+            if (embeddedFont != null) return embeddedFont;
             var preferredFonts = new[] { "Yu Gothic UI", "Yu Gothic", "Meiryo UI", "Meiryo", "MS Gothic" };
             foreach (var fontName in preferredFonts)
             {
@@ -750,7 +1296,7 @@ namespace VerdantBlade
 
         private string ContextHint()
         {
-            var elapsed = Time.unscaledTime - runStartedAt;
+            var elapsed = ElapsedRunSeconds;
             if (elapsed < 8f) return "移動：WASD、矢印キー、またはコントローラーのスティック。";
             if (elapsed < 17f) return "マウスで方向を定め、攻撃とダッシュで危険を切り抜けよう。";
             if (Player != null && Player.Health <= 2) return "壺を壊してライフブルームを探そう。拾うとライフが回復します。";
@@ -762,7 +1308,7 @@ namespace VerdantBlade
         private string DashText()
         {
             return Player == null || Player.DashCooldownRemaining <= 0.01f
-                ? "ダッシュ  " + GameInput.BindingLabel(GameAction.Dash) + " / X / B  使用可"
+                ? "ダッシュ  " + GameInput.BindingLabel(GameAction.Dash) + " / X / " + GameInput.GamepadHintLabel(GameAction.Dash) + "  使用可"
                 : "ダッシュ  " + Player.DashCooldownRemaining.ToString("0.0") + "秒";
         }
 
@@ -804,6 +1350,22 @@ namespace VerdantBlade
             }
         }
 
+        private static string AchievementDescription(string id)
+        {
+            switch (id)
+            {
+                case "first_steps": return "最初の冒険を開始する";
+                case "shard_seeker": return "太陽の欠片を8個集める";
+                case "warden_slayer": return "門の守護者を倒す";
+                case "gatewalker": return "古代の門をくぐり、クリアする";
+                case "unbroken": return "被ダメージ0でクリアする";
+                case "swift_blade": return "2分30秒以内にクリアする";
+                case "forest_hunter": return "敵を8体倒す";
+                case "potter": return "壺を4個壊す";
+                default: return "冒険を進めて解除する";
+            }
+        }
+
         private static string ActionLabel(GameAction action)
         {
             switch (action)
@@ -839,36 +1401,71 @@ namespace VerdantBlade
         }
 
         private static string OnOff(bool value) => value ? "オン" : "オフ";
+        private static string DisplayModeLabel(DisplayMode displayMode)
+        {
+            switch (displayMode)
+            {
+                case DisplayMode.Fullscreen: return "フルスクリーン";
+                case DisplayMode.Windowed: return "ウィンドウ";
+                default: return "ボーダーレス";
+            }
+        }
+
+        private string ResolutionLabel()
+        {
+            switch (ResolutionIndex)
+            {
+                case 1: return "1600 × 900";
+                case 2: return "1920 × 1080";
+                default: return "1280 × 720";
+            }
+        }
         private void TogglePause()
         {
             if (IsFinished || state == RunState.Title) return;
             state = state == RunState.Paused ? RunState.Playing : RunState.Paused;
             Time.timeScale = state == RunState.Playing ? 1f : 0f;
+            if (SfxService.Instance != null) SfxService.Instance.SetMusicPaused(state == RunState.Paused);
             pausedByFocusLoss = false;
-            if (state == RunState.Playing) pauseSettingsOpen = false;
+            if (state == RunState.Playing)
+            {
+                pauseSettingsOpen = false;
+            }
+            else
+            {
+                SaveRunSnapshot();
+            }
         }
 
         private void RestartRun()
         {
+            SubmitCurrentRunAsAbandoned();
+            PlayerProfile.ClearRunSnapshot();
+            resumeSnapshot = null;
+            destroyedEntityIds.Clear();
+            startRunOnSceneLoad = true;
             Time.timeScale = 1f;
             SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
         }
 
         private void ReturnToTitle()
         {
+            SaveRunSnapshot();
             Time.timeScale = 1f;
             SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
         }
 
         private void SaveSettings()
         {
-            PlayerProfile.SaveSettings(SfxVolume, ReduceFlashing, ScreenShakeEnabled, HighContrast, LargeText);
+            PlayerProfile.SaveSettings(SfxVolume, MusicVolume, ReduceFlashing, ScreenShakeEnabled, HighContrast, LargeText);
         }
 
         private void HandleSettingsShortcuts()
         {
             if (Input.GetKeyDown(KeyCode.LeftBracket)) SetSfxVolume(SfxVolume - 0.1f);
             if (Input.GetKeyDown(KeyCode.RightBracket)) SetSfxVolume(SfxVolume + 0.1f);
+            if (Input.GetKeyDown(KeyCode.Minus)) SetMusicVolume(MusicVolume - 0.1f);
+            if (Input.GetKeyDown(KeyCode.Equals)) SetMusicVolume(MusicVolume + 0.1f);
             if (Input.GetKeyDown(KeyCode.F)) ToggleReducedFlashing();
             if (Input.GetKeyDown(KeyCode.C)) ToggleScreenShake();
             if (Input.GetKeyDown(KeyCode.H)) ToggleHighContrast();
@@ -881,6 +1478,149 @@ namespace VerdantBlade
             state = RunState.Paused;
             pausedByFocusLoss = true;
             Time.timeScale = 0f;
+            if (SfxService.Instance != null) SfxService.Instance.SetMusicPaused(true);
+            SaveRunSnapshot();
+        }
+
+        private bool CapturePendingGamepadBinding()
+        {
+            if (pendingGamepadBinding == GameAction.None || !GameInput.TryCaptureGamepadButton(out var captured)) return false;
+            if (GameInput.IsGamepadBoundElsewhere(pendingGamepadBinding, captured))
+            {
+                settingsNotice = GameInput.KeyLabel(captured) + " は別のゲームパッド操作に割り当て済みです。";
+                return true;
+            }
+            GameInput.SetGamepadBinding(pendingGamepadBinding, captured);
+            settingsNotice = ActionLabel(pendingGamepadBinding) + " を " + GameInput.GamepadBindingLabel(pendingGamepadBinding) + " に設定しました。";
+            pendingGamepadBinding = GameAction.None;
+            if (SfxService.Instance != null) SfxService.Instance.Play(SoundCue.MenuConfirm);
+            return true;
+        }
+
+        private void ApplyDisplaySettings()
+        {
+            var resolutions = new[] { new Vector2Int(1280, 720), new Vector2Int(1600, 900), new Vector2Int(1920, 1080) };
+            var resolution = resolutions[Mathf.Clamp(ResolutionIndex, 0, resolutions.Length - 1)];
+            var mode = SelectedDisplayMode == DisplayMode.Fullscreen
+                ? FullScreenMode.ExclusiveFullScreen
+                : SelectedDisplayMode == DisplayMode.Borderless ? FullScreenMode.FullScreenWindow : FullScreenMode.Windowed;
+            QualitySettings.vSyncCount = VSyncEnabled ? 1 : 0;
+            Application.targetFrameRate = VSyncEnabled ? -1 : 120;
+            Screen.SetResolution(resolution.x, resolution.y, mode);
+        }
+
+        private void CycleDisplayMode()
+        {
+            SelectedDisplayMode = SelectedDisplayMode == DisplayMode.Windowed ? DisplayMode.Fullscreen : (DisplayMode)((int)SelectedDisplayMode + 1);
+            SaveAndApplyDisplaySettings();
+        }
+
+        private void CycleResolution()
+        {
+            ResolutionIndex = (ResolutionIndex + 1) % 3;
+            SaveAndApplyDisplaySettings();
+        }
+
+        private void ToggleVSync()
+        {
+            VSyncEnabled = !VSyncEnabled;
+            SaveAndApplyDisplaySettings();
+        }
+
+        private void SaveAndApplyDisplaySettings()
+        {
+            PlayerProfile.SaveDisplaySettings(SelectedDisplayMode, ResolutionIndex, VSyncEnabled);
+            ApplyDisplaySettings();
+        }
+
+        private void ResetAllSettings()
+        {
+            PlayerProfile.ResetSettings();
+            GameInput.ResetBindings();
+            GameInput.ResetGamepadBindings();
+            SfxVolume = PlayerProfile.LoadSfxVolume();
+            MusicVolume = PlayerProfile.LoadMusicVolume();
+            ReduceFlashing = PlayerProfile.LoadReduceFlashing();
+            ScreenShakeEnabled = PlayerProfile.LoadScreenShake();
+            HighContrast = PlayerProfile.LoadHighContrast();
+            LargeText = PlayerProfile.LoadLargeText();
+            SelectedDisplayMode = PlayerProfile.LoadDisplayMode();
+            ResolutionIndex = PlayerProfile.LoadResolutionIndex();
+            VSyncEnabled = PlayerProfile.LoadVSync();
+            titleStyle = null;
+            if (SfxService.Instance != null)
+            {
+                SfxService.Instance.SetVolume(SfxVolume);
+                SfxService.Instance.SetMusicVolume(MusicVolume);
+            }
+            ApplyDisplaySettings();
+            settingsNotice = "設定と操作を初期状態に戻しました。";
+        }
+
+        private void ResetProgressAndReload()
+        {
+            PlayerProfile.ResetProgress();
+            resumeSnapshot = null;
+            destroyedEntityIds.Clear();
+            resetConfirmation = false;
+            Time.timeScale = 1f;
+            SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
+        }
+
+        private void QuitGame()
+        {
+            SaveRunSnapshot();
+            Application.Quit();
+        }
+
+        private void SaveRunSnapshot()
+        {
+            if ((state != RunState.Playing && state != RunState.Paused) || runSubmitted || Player == null)
+            {
+                return;
+            }
+            resumeSnapshot = new RunSnapshot
+            {
+                difficulty = (int)SelectedDifficulty,
+                worldVariant = WorldVariant,
+                shards = shards,
+                combatScore = combatScore,
+                enemiesDefeated = EnemiesDefeated,
+                potsBroken = PotsBroken,
+                damageTaken = DamageTaken,
+                bestCombo = bestCombo,
+                elapsedSeconds = ElapsedRunSeconds,
+                playerX = Player.transform.position.x,
+                playerY = Player.transform.position.y,
+                playerHealth = Player.Health,
+                destroyedEntityIds = string.Join("|", new List<string>(destroyedEntityIds).ToArray())
+            };
+            PlayerProfile.SaveRunSnapshot(resumeSnapshot);
+        }
+
+        private void RestoreDestroyedEntityIds(string packedIds)
+        {
+            if (!string.IsNullOrEmpty(packedIds))
+            {
+                foreach (var id in packedIds.Split('|'))
+                {
+                    if (!string.IsNullOrEmpty(id)) destroyedEntityIds.Add(id);
+                }
+            }
+            IsGuardianDefeated = destroyedEntityIds.Contains("warden");
+        }
+
+        private void SubmitCurrentRunAsAbandoned()
+        {
+            if (runSubmitted || (state != RunState.Playing && state != RunState.Paused)) return;
+            PlayerProfile.SubmitAttempt(SelectedDifficulty, shards, EnemiesDefeated, PotsBroken, DamageTaken, true);
+            runSubmitted = true;
+        }
+
+        private void SubmitSnapshotAsAbandoned()
+        {
+            if (resumeSnapshot == null) return;
+            PlayerProfile.SubmitAttempt((Difficulty)resumeSnapshot.difficulty, resumeSnapshot.shards, resumeSnapshot.enemiesDefeated, resumeSnapshot.potsBroken, resumeSnapshot.damageTaken, true);
         }
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD

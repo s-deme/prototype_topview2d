@@ -16,6 +16,7 @@ namespace VerdantBlade
         private float nextVolleyAt;
         private bool active;
         private bool defeated;
+        private string entityId;
 
         private void Awake()
         {
@@ -26,10 +27,11 @@ namespace VerdantBlade
             healthBar = gameObject.AddComponent<WorldHealthBar>();
         }
 
-        public void Configure(int startingHealth, float movementSpeed)
+        public void Configure(int startingHealth, float movementSpeed, string stableEntityId = null)
         {
             health = startingHealth;
             speed = movementSpeed;
+            entityId = stableEntityId;
             healthBar.Configure(health);
         }
 
@@ -101,6 +103,7 @@ namespace VerdantBlade
             {
                 defeated = true;
                 GameManager.Instance.RegisterEnemyDefeated(500);
+                GameManager.Instance.RegisterDestroyedEntity(entityId);
                 GetComponent<Collider2D>().enabled = false;
                 body.linearVelocity = Vector2.zero;
                 GameManager.Instance.MarkGuardianDefeated();

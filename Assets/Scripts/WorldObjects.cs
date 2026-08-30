@@ -13,12 +13,14 @@ namespace VerdantBlade
         private Kind kind;
         private int value;
         private Vector3 initialPosition;
+        private string entityId;
 
-        public void Configure(Kind collectibleKind, int collectibleValue)
+        public void Configure(Kind collectibleKind, int collectibleValue, string stableEntityId = null)
         {
             kind = collectibleKind;
             value = collectibleValue;
             initialPosition = transform.position;
+            entityId = stableEntityId;
         }
 
         private void Update()
@@ -44,6 +46,7 @@ namespace VerdantBlade
                 player.Heal(value * 2);
                 SfxService.Instance.Play(SoundCue.CollectHeart);
             }
+            GameManager.Instance.RegisterDestroyedEntity(entityId);
             Destroy(gameObject);
         }
     }

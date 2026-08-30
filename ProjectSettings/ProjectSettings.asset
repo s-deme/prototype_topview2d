@@ -26,7 +26,7 @@ PlayerSettings:
   applicationIdentifier:
     Standalone: com.prototypestudio.verdantblade
   buildNumber:
-    Standalone: 0
+    Standalone: 1
   scriptingDefineSymbols: {}
   additionalCompilerArguments: {}
   platformArchitecture: {}

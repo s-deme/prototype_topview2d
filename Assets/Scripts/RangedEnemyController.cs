@@ -15,6 +15,7 @@ namespace VerdantBlade
         private float nextShotTime;
         private float strafeSign;
         private bool defeated;
+        private string entityId;
 
         private void Awake()
         {
@@ -25,10 +26,11 @@ namespace VerdantBlade
             nextShotTime = Time.time + Random.Range(0.45f, 1.1f);
         }
 
-        public void Configure(int startingHealth, float movementSpeed)
+        public void Configure(int startingHealth, float movementSpeed, string stableEntityId = null)
         {
             health = startingHealth;
             speed = movementSpeed;
+            entityId = stableEntityId;
             healthBar.Configure(health);
         }
 
@@ -104,6 +106,7 @@ namespace VerdantBlade
             {
                 defeated = true;
                 GameManager.Instance.RegisterEnemyDefeated(75);
+                GameManager.Instance.RegisterDestroyedEntity(entityId);
                 body.linearVelocity = Vector2.zero;
                 GetComponent<Collider2D>().enabled = false;
                 StartCoroutine(DefeatSequence());

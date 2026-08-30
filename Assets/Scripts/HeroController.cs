@@ -112,6 +112,13 @@ namespace VerdantBlade
             }
         }
 
+        public void RestoreState(int restoredHealth, Vector2 restoredPosition)
+        {
+            health = Mathf.Clamp(restoredHealth, 1, MaxHealth);
+            body.position = restoredPosition;
+            transform.position = restoredPosition;
+        }
+
         private void Attack()
         {
             if (Time.time < nextAttackTime || GameManager.Instance.IsGameplayLocked)

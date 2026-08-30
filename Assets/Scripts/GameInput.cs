@@ -27,7 +27,12 @@ namespace VerdantBlade
             GameAction.MoveUp, GameAction.MoveDown, GameAction.MoveLeft, GameAction.MoveRight,
             GameAction.Attack, GameAction.Dash, GameAction.Pause
         };
+        private static readonly GameAction[] RebindableGamepadActions =
+        {
+            GameAction.Attack, GameAction.Dash, GameAction.Pause
+        };
         private static readonly Dictionary<GameAction, KeyCode> bindings = new Dictionary<GameAction, KeyCode>();
+        private static readonly Dictionary<GameAction, KeyCode> gamepadBindings = new Dictionary<GameAction, KeyCode>();
         private static bool loaded;
 
         public static Vector2 Move
@@ -42,16 +47,19 @@ namespace VerdantBlade
             }
         }
 
-        public static bool PrimaryPressed => IsPressed(GameAction.Attack) || Input.GetKeyDown(KeyCode.Z) || Input.GetMouseButtonDown(0) || Input.GetKeyDown(KeyCode.JoystickButton0);
-        public static bool DashPressed => IsPressed(GameAction.Dash) || Input.GetKeyDown(KeyCode.X) || Input.GetMouseButtonDown(1) || Input.GetKeyDown(KeyCode.JoystickButton1);
-        public static bool PausePressed => IsPressed(GameAction.Pause) || Input.GetKeyDown(KeyCode.P) || Input.GetKeyDown(KeyCode.JoystickButton7);
+        public static bool PrimaryPressed => IsPressed(GameAction.Attack) || Input.GetKeyDown(KeyCode.Z) || Input.GetMouseButtonDown(0) || IsGamepadPressed(GameAction.Attack);
+        public static bool DashPressed => IsPressed(GameAction.Dash) || Input.GetKeyDown(KeyCode.X) || Input.GetMouseButtonDown(1) || IsGamepadPressed(GameAction.Dash);
+        public static bool PausePressed => IsPressed(GameAction.Pause) || Input.GetKeyDown(KeyCode.P) || IsGamepadPressed(GameAction.Pause);
         public static bool RestartPressed => Input.GetKeyDown(KeyCode.R) || Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.JoystickButton0);
         public static bool MenuConfirmPressed => Input.GetKeyDown(KeyCode.Space) || Input.GetKeyDown(KeyCode.Z) || Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.JoystickButton0);
         public static bool MenuBackPressed => Input.GetKeyDown(KeyCode.Escape) || Input.GetKeyDown(KeyCode.JoystickButton1);
         public static bool MenuUpPressed => Input.GetKeyDown(KeyCode.UpArrow) || Input.GetKeyDown(KeyCode.W) || Input.GetKeyDown(KeyCode.JoystickButton13);
         public static bool MenuDownPressed => Input.GetKeyDown(KeyCode.DownArrow) || Input.GetKeyDown(KeyCode.S) || Input.GetKeyDown(KeyCode.JoystickButton14);
+        public static bool MenuLeftPressed => Input.GetKeyDown(KeyCode.LeftArrow) || Input.GetKeyDown(KeyCode.A) || Input.GetKeyDown(KeyCode.JoystickButton15);
+        public static bool MenuRightPressed => Input.GetKeyDown(KeyCode.RightArrow) || Input.GetKeyDown(KeyCode.D) || Input.GetKeyDown(KeyCode.JoystickButton16);
 
         public static IEnumerable<GameAction> Actions => RebindableActions;
+        public static IEnumerable<GameAction> GamepadActions => RebindableGamepadActions;
 
         public static KeyCode GetBinding(GameAction action)
         {
@@ -62,6 +70,31 @@ namespace VerdantBlade
         public static string BindingLabel(GameAction action)
         {
             return KeyLabel(GetBinding(action));
+        }
+
+        public static KeyCode GetGamepadBinding(GameAction action)
+        {
+            EnsureLoaded();
+            return gamepadBindings[action];
+        }
+
+        public static string GamepadBindingLabel(GameAction action)
+        {
+            return KeyLabel(GetGamepadBinding(action));
+        }
+
+        /// <summary>A compact button label suitable for space-constrained gameplay HUDs.</summary>
+        public static string GamepadHintLabel(GameAction action)
+        {
+            switch (GetGamepadBinding(action))
+            {
+                case KeyCode.JoystickButton0: return "A";
+                case KeyCode.JoystickButton1: return "B";
+                case KeyCode.JoystickButton2: return "X";
+                case KeyCode.JoystickButton3: return "Y";
+                case KeyCode.JoystickButton7: return "START";
+                default: return "Btn " + ((int)GetGamepadBinding(action) - (int)KeyCode.JoystickButton0);
+            }
         }
 
         public static string KeyLabel(KeyCode key)
@@ -83,6 +116,11 @@ namespace VerdantBlade
                 case KeyCode.RightArrow: return "→";
                 case KeyCode.Mouse0: return "左クリック";
                 case KeyCode.Mouse1: return "右クリック";
+                case KeyCode.JoystickButton0: return "A / Button 0";
+                case KeyCode.JoystickButton1: return "B / Button 1";
+                case KeyCode.JoystickButton2: return "X / Button 2";
+                case KeyCode.JoystickButton3: return "Y / Button 3";
+                case KeyCode.JoystickButton7: return "Start / Button 7";
                 default: return key.ToString();
             }
         }
@@ -118,11 +156,57 @@ namespace VerdantBlade
             EnsureLoaded();
         }
 
+        public static bool IsGamepadBoundElsewhere(GameAction action, KeyCode key)
+        {
+            EnsureLoaded();
+            foreach (var pair in gamepadBindings)
+            {
+                if (pair.Key != action && pair.Value == key)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        public static void SetGamepadBinding(GameAction action, KeyCode key)
+        {
+            if (!IsGamepadAction(action) || !IsJoystickButton(key) || IsGamepadBoundElsewhere(action, key))
+            {
+                return;
+            }
+            gamepadBindings[action] = key;
+            PlayerProfile.SaveGamepadBinding(action, key);
+        }
+
+        public static void ResetGamepadBindings()
+        {
+            gamepadBindings.Clear();
+            loaded = false;
+            PlayerProfile.ResetGamepadBindings();
+            EnsureLoaded();
+        }
+
         public static bool TryCaptureKeyboardKey(out KeyCode key)
         {
             foreach (KeyCode candidate in Enum.GetValues(typeof(KeyCode)))
             {
                 if ((int)candidate >= (int)KeyCode.Backspace && (int)candidate <= (int)KeyCode.Menu && Input.GetKeyDown(candidate))
+                {
+                    key = candidate;
+                    return true;
+                }
+            }
+            key = KeyCode.None;
+            return false;
+        }
+
+        public static bool TryCaptureGamepadButton(out KeyCode key)
+        {
+            for (var index = (int)KeyCode.JoystickButton0; index <= (int)KeyCode.JoystickButton19; index++)
+            {
+                var candidate = (KeyCode)index;
+                if (Input.GetKeyDown(candidate))
                 {
                     key = candidate;
                     return true;
@@ -155,12 +239,21 @@ namespace VerdantBlade
             return Input.GetKey(GetBinding(action));
         }
 
+        private static bool IsGamepadPressed(GameAction action)
+        {
+            return IsGamepadAction(action) && Input.GetKeyDown(GetGamepadBinding(action));
+        }
+
         private static void EnsureLoaded()
         {
             if (loaded) return;
             foreach (var action in RebindableActions)
             {
                 bindings[action] = PlayerProfile.LoadBinding(action, DefaultBinding(action));
+            }
+            foreach (var action in RebindableGamepadActions)
+            {
+                gamepadBindings[action] = PlayerProfile.LoadGamepadBinding(action, DefaultGamepadBinding(action));
             }
             loaded = true;
         }
@@ -178,6 +271,31 @@ namespace VerdantBlade
                 case GameAction.Pause: return KeyCode.Escape;
                 default: return KeyCode.None;
             }
+        }
+
+        private static KeyCode DefaultGamepadBinding(GameAction action)
+        {
+            switch (action)
+            {
+                case GameAction.Attack: return KeyCode.JoystickButton0;
+                case GameAction.Dash: return KeyCode.JoystickButton1;
+                case GameAction.Pause: return KeyCode.JoystickButton7;
+                default: return KeyCode.None;
+            }
+        }
+
+        private static bool IsGamepadAction(GameAction action)
+        {
+            foreach (var candidate in RebindableGamepadActions)
+            {
+                if (candidate == action) return true;
+            }
+            return false;
+        }
+
+        private static bool IsJoystickButton(KeyCode key)
+        {
+            return key >= KeyCode.JoystickButton0 && key <= KeyCode.JoystickButton19;
         }
     }
 }

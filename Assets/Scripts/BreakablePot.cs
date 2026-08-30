@@ -7,11 +7,13 @@ namespace VerdantBlade
         private Collectible.Kind dropKind;
         private int dropValue;
         private bool broken;
+        private string entityId;
 
-        public void Configure(Collectible.Kind collectibleKind, int collectibleValue)
+        public void Configure(Collectible.Kind collectibleKind, int collectibleValue, string stableEntityId = null)
         {
             dropKind = collectibleKind;
             dropValue = collectibleValue;
+            entityId = stableEntityId;
         }
 
         public void TakeHit(int damage, Vector2 sourcePosition)
@@ -24,6 +26,7 @@ namespace VerdantBlade
             broken = true;
             SfxService.Instance.Play(SoundCue.PotBreak);
             GameManager.Instance.RegisterPotBroken();
+            GameManager.Instance.RegisterDestroyedEntity(entityId);
             GetComponent<Collider2D>().enabled = false;
             var potPosition = (Vector2)transform.position;
             GameBootstrap.Instance.SpawnPickup(dropKind, potPosition + Random.insideUnitCircle * 0.12f);

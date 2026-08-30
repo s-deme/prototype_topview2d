@@ -25,8 +25,11 @@ namespace VerdantBlade
 
         private readonly Dictionary<SoundCue, AudioClip> clips = new Dictionary<SoundCue, AudioClip>();
         private AudioSource source;
+        private AudioSource musicSource;
+        private AudioClip musicClip;
 
         public float Volume { get; private set; } = 0.62f;
+        public float MusicVolume { get; private set; } = 0.38f;
 
         private void Awake()
         {
@@ -34,12 +37,45 @@ namespace VerdantBlade
             source = gameObject.AddComponent<AudioSource>();
             source.playOnAwake = false;
             source.spatialBlend = 0f;
+            musicSource = gameObject.AddComponent<AudioSource>();
+            musicSource.playOnAwake = false;
+            musicSource.spatialBlend = 0f;
+            musicSource.loop = true;
             SetVolume(PlayerProfile.LoadSfxVolume());
+            SetMusicVolume(PlayerProfile.LoadMusicVolume());
+            musicClip = BuildMusicLoop();
+            musicSource.clip = musicClip;
+            musicSource.Play();
         }
 
         public void SetVolume(float value)
         {
             Volume = Mathf.Clamp01(value);
+        }
+
+        public void SetMusicVolume(float value)
+        {
+            MusicVolume = Mathf.Clamp01(value);
+            if (musicSource != null)
+            {
+                musicSource.volume = MusicVolume;
+            }
+        }
+
+        public void SetMusicPaused(bool paused)
+        {
+            if (musicSource == null)
+            {
+                return;
+            }
+            if (paused)
+            {
+                musicSource.Pause();
+            }
+            else
+            {
+                musicSource.UnPause();
+            }
         }
 
         public void Play(SoundCue cue)
@@ -96,6 +132,31 @@ namespace VerdantBlade
                 samples[index] = Mathf.Sin(phase) * envelope * amplitude;
             }
             var clip = AudioClip.Create(name, sampleCount, 1, sampleRate, false);
+            clip.SetData(samples, 0);
+            return clip;
+        }
+
+        private static AudioClip BuildMusicLoop()
+        {
+            const int sampleRate = 22050;
+            const float duration = 12f;
+            var sampleCount = Mathf.CeilToInt(sampleRate * duration);
+            var samples = new float[sampleCount];
+            var chordRoots = new[] { 146.83f, 174.61f, 196f, 164.81f };
+            for (var index = 0; index < sampleCount; index++)
+            {
+                var time = (float)index / sampleRate;
+                var chord = Mathf.FloorToInt(time / 3f) % chordRoots.Length;
+                var root = chordRoots[chord];
+                var phase = (time % 3f) / 3f;
+                var envelope = Mathf.SmoothStep(0f, 1f, Mathf.Min(phase * 7f, (1f - phase) * 7f));
+                var pad = Mathf.Sin(time * root * Mathf.PI * 2f) * 0.035f;
+                pad += Mathf.Sin(time * root * 1.5f * Mathf.PI * 2f) * 0.022f;
+                pad += Mathf.Sin(time * root * 2f * Mathf.PI * 2f) * 0.012f;
+                var bell = Mathf.Sin(time * (root * 4f) * Mathf.PI * 2f) * Mathf.Pow(Mathf.Max(0f, Mathf.Sin(time * Mathf.PI / 1.5f)), 12f) * 0.018f;
+                samples[index] = (pad + bell) * envelope;
+            }
+            var clip = AudioClip.Create("Verdant Blade Ambient Loop", sampleCount, 1, sampleRate, false);
             clip.SetData(samples, 0);
             return clip;
         }

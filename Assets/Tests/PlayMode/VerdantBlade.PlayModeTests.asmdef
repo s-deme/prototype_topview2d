@@ -1,0 +1,19 @@
+{
+  "name": "VerdantBlade.PlayModeTests",
+  "rootNamespace": "VerdantBlade.Tests",
+  "references": [
+    "VerdantBlade.Runtime"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": false,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false,
+  "optionalUnityReferences": [
+    "TestAssemblies"
+  ]
+}
