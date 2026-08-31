@@ -8,7 +8,7 @@ Unity 6 移行内容と初回起動の注意点は [UNITY6_MIGRATION.md](UNITY6_
 
 ## 起動
 
-1. Unity Hub でこのフォルダーを **Unity 6.3.22f1** として開きます。
+1. Unity Hub でこのフォルダーを **Unity 6.3 LTS（`6000.3.22f1`）** として開きます。
 2. `Assets/Scenes/Prototype.unity` を開き、Play を押します。
 3. タイトルの `冒険をはじめる` を押すか、`Enter`、`Space`、`Z`、コントローラー A で開始します。
 
@@ -41,12 +41,13 @@ Unity 6 移行内容と初回起動の注意点は [UNITY6_MIGRATION.md](UNITY6_
 
 ## 開発・検証
 
-- `GameInput.cs` に入力を集約しているため、将来の Unity Input System 移行やキーコンフィグ追加の入口が一か所です。
+- `GameInput.cs` に入力と実装済みのキー／ゲームパッド設定を集約しているため、将来の Unity Input System 移行や入力拡張の入口が一か所です。
 - `GameRules.cs` はスコア・Shard・タイム判定を Unity UI から分離した純粋なルール層です。
+- `GameManager` はゲーム進行、メニュー入力（`GameManager.MenuInput.cs`）、UIスタイルと表示文言（`GameManager.Presentation.cs`）へ責務を分けています。
 - EditMode と PlayMode のテストアセンブリがあります。Unity の **Window > General > Test Runner** から実行できます。
 - Unity メニューの **Verdant Blade > Validate Prototype Setup** は、開始シーンと Bootstrap スクリプト、Build Settings を短時間で検証します。
 - **Verdant Blade > Build Windows Release**、または [`tools/BuildWindows.ps1`](tools/BuildWindows.ps1) でWindows 64-bitビルドを作成できます。リリース確認は [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) を参照してください。
-- GitHub Actionsは EditMode、PlayMode、Windowsビルドを実行します。利用前にリポジトリの `UNITY_LICENSE` シークレットを設定してください。
+- GitHub ActionsはEditMode、PlayMode、Windows検証ビルドを実行します。CIはローカルの `VerdantBladeBuild.BuildWindows64` を呼び出さない別経路のため、公開用成果物はリリースチェックリストに従ってローカルのリリースビルドを作成してください。利用前にリポジトリの `UNITY_LICENSE` シークレットを設定します。
 - Editor / Development Build に限り、`F1` で診断 HUD、`F2` で Shard 追加、`F3` で全回復を利用できます。リリースビルドには含まれません。
 
 ### 手動スモークテスト

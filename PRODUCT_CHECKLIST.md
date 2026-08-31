@@ -74,7 +74,7 @@
 - [x] Editor / Development Build 限定の診断 HUD と QA ショートカット
 - [x] 起動、テスト、手動スモークテストを README に文書化
 - [x] 保存キーを `VerdantBlade.` 名前空間に固定し、設定と進行データを分離
-- [x] Windowsビルドメニュー、PowerShellビルドスクリプト、アイコン、バージョン、配布ライセンス、第三者表示
+- [x] Windowsビルドメニュー、PowerShellビルドスクリプト、アイコン、バージョン、およびリポジトリ内の配布ライセンス・第三者表示
 - [x] EditMode／PlayMode／Windowsビルドを行うGitHub Actions
 
 ## 設計判断
@@ -82,3 +82,4 @@
 - UI は Unity の標準 IMGUI とランタイム生成スプライトで構成しています。日本語は同梱した Noto Sans JP を優先し、使えない環境では Windows のシステムフォント、最後に Unity の標準フォントへフォールバックします。
 - 入力分岐は `GameInput` に集約しています。キーボード、マウス、標準コントローラーの重複操作をそのまま利用でき、将来の Input System への移行も局所化されています。
 - 保存は端末ローカルの `PlayerPrefs` です。クラウド同期、アカウント、課金、オンラインランキングのような外部サービス要件は、このオフライン製品スコープには含めていません。
+- `LICENSE` と `THIRD_PARTY_NOTICES.md` の最終配布物への同梱は自動化されていません。公開前に [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) に従って手動確認します。
