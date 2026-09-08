@@ -69,22 +69,22 @@ namespace VerdantBlade
 
         public static int EnemyHealth(int baseHealth, Difficulty difficulty)
         {
-            if (difficulty == Difficulty.Explorer)
+            return difficulty switch
             {
-                return Mathf.Max(1, baseHealth - 1);
-            }
-            if (difficulty == Difficulty.Veteran)
-            {
-                return baseHealth + 1;
-            }
-            return baseHealth;
+                Difficulty.Explorer => Mathf.Max(1, baseHealth - 1),
+                Difficulty.Veteran => baseHealth + 1,
+                _ => baseHealth
+            };
         }
 
         public static float EnemySpeed(float baseSpeed, Difficulty difficulty)
         {
-            if (difficulty == Difficulty.Explorer) return baseSpeed * 0.9f;
-            if (difficulty == Difficulty.Veteran) return baseSpeed * 1.12f;
-            return baseSpeed;
+            return difficulty switch
+            {
+                Difficulty.Explorer => baseSpeed * 0.9f,
+                Difficulty.Veteran => baseSpeed * 1.12f,
+                _ => baseSpeed
+            };
         }
     }
 }
