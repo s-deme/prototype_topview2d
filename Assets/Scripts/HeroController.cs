@@ -207,8 +207,9 @@ namespace VerdantBlade
             var bladePosition = facing * 0.43f;
             bladeTransform.localPosition = bladePosition;
             hiltTransform.localPosition = facing * 0.35f;
-            bladeTransform.localRotation = Quaternion.Euler(0f, 0f, angle);
-            hiltTransform.localRotation = Quaternion.Euler(0f, 0f, angle);
+            var rotation = Quaternion.Euler(0f, 0f, angle);
+            bladeTransform.localRotation = rotation;
+            hiltTransform.localRotation = rotation;
             bodyVisual.transform.localScale = IsDashing ? Vector3.Scale(bodyBaseScale, new Vector3(1.1f, 0.86f, 1f)) : bodyBaseScale;
         }
 

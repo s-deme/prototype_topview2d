@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using UnityEngine;
 
 namespace VerdantBlade
@@ -23,9 +22,6 @@ namespace VerdantBlade
             subtleCenterStyle = MakeStyle(LargeText ? 16 : 14, FontStyle.Normal, TextAnchor.MiddleCenter);
             titleCenterStyle = MakeStyle(LargeText ? 38 : 34, FontStyle.Bold, TextAnchor.MiddleCenter);
             buttonStyle = MakeButtonStyle(LargeText ? 16 : 14);
-            buttonStyle.normal.textColor = Color.white;
-            buttonStyle.hover.textColor = Color.white;
-            buttonStyle.active.textColor = Color.white;
         }
 
         private GUIStyle MakeStyle(int fontSize, FontStyle fontStyle, TextAnchor alignment)
@@ -170,18 +166,6 @@ namespace VerdantBlade
             var count = 0;
             foreach (var id in AchievementIds) if (PlayerProfile.IsAchievementUnlocked(id)) count++;
             return count;
-        }
-
-        private static string AchievementProgressText()
-        {
-            var locked = new List<string>();
-            foreach (var id in AchievementIds)
-            {
-                if (!PlayerProfile.IsAchievementUnlocked(id)) locked.Add(AchievementName(id));
-            }
-            if (locked.Count == 0) return "森に伝わる実績をすべて達成しました。";
-            var shown = locked.GetRange(0, Mathf.Min(3, locked.Count));
-            return "次の目標：" + string.Join("、", shown.ToArray()) + (locked.Count > shown.Count ? "  ほか" + (locked.Count - shown.Count) + "件" : string.Empty);
         }
 
         private static string OnOff(bool value) => value ? "オン" : "オフ";

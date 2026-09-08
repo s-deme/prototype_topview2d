@@ -39,10 +39,7 @@ namespace VerdantBlade.EditorTools
             PlayerSettings.bundleVersion = GameManager.ProductVersion;
             var applicationIconSizes = PlayerSettings.GetIconSizes(NamedBuildTarget.Standalone, IconKind.Application);
             var applicationIcons = new Texture2D[applicationIconSizes.Length];
-            for (var index = 0; index < applicationIcons.Length; index++)
-            {
-                applicationIcons[index] = icon;
-            }
+            Array.Fill(applicationIcons, icon);
 
             PlayerSettings.SetIcons(NamedBuildTarget.Standalone, applicationIcons, IconKind.Application);
             Directory.CreateDirectory(OutputDirectory);

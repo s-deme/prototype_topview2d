@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
@@ -32,8 +31,7 @@ namespace VerdantBlade
             PlayerProfile.SaveDifficulty(SelectedDifficulty);
             // The whole encounter is generated while the title is visible, so reload before a run
             // to apply this tuning consistently to the player, every enemy, and the boss.
-            Time.timeScale = 1f;
-            SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
+            ReloadCurrentScene();
         }
 
         private void TogglePause()
@@ -60,13 +58,17 @@ namespace VerdantBlade
             resumeSnapshot = null;
             destroyedEntityIds.Clear();
             startRunOnSceneLoad = true;
-            Time.timeScale = 1f;
-            SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
+            ReloadCurrentScene();
         }
 
         private void ReturnToTitle()
         {
             SaveRunSnapshot();
+            ReloadCurrentScene();
+        }
+
+        private static void ReloadCurrentScene()
+        {
             Time.timeScale = 1f;
             SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
         }
@@ -74,6 +76,23 @@ namespace VerdantBlade
         private void SaveSettings()
         {
             PlayerProfile.SaveSettings(SfxVolume, MusicVolume, ReduceFlashing, ScreenShakeEnabled, HighContrast, LargeText);
+        }
+
+        private void LoadAudioAndAccessibilitySettings()
+        {
+            SfxVolume = PlayerProfile.LoadSfxVolume();
+            MusicVolume = PlayerProfile.LoadMusicVolume();
+            ReduceFlashing = PlayerProfile.LoadReduceFlashing();
+            ScreenShakeEnabled = PlayerProfile.LoadScreenShake();
+            HighContrast = PlayerProfile.LoadHighContrast();
+            LargeText = PlayerProfile.LoadLargeText();
+        }
+
+        private void LoadDisplayPreferences()
+        {
+            SelectedDisplayMode = PlayerProfile.LoadDisplayMode();
+            ResolutionIndex = PlayerProfile.LoadResolutionIndex();
+            VSyncEnabled = PlayerProfile.LoadVSync();
         }
 
         private void HandleSettingsShortcuts()
@@ -138,15 +157,8 @@ namespace VerdantBlade
             PlayerProfile.ResetSettings();
             GameInput.ResetBindings();
             GameInput.ResetGamepadBindings();
-            SfxVolume = PlayerProfile.LoadSfxVolume();
-            MusicVolume = PlayerProfile.LoadMusicVolume();
-            ReduceFlashing = PlayerProfile.LoadReduceFlashing();
-            ScreenShakeEnabled = PlayerProfile.LoadScreenShake();
-            HighContrast = PlayerProfile.LoadHighContrast();
-            LargeText = PlayerProfile.LoadLargeText();
-            SelectedDisplayMode = PlayerProfile.LoadDisplayMode();
-            ResolutionIndex = PlayerProfile.LoadResolutionIndex();
-            VSyncEnabled = PlayerProfile.LoadVSync();
+            LoadAudioAndAccessibilitySettings();
+            LoadDisplayPreferences();
             titleStyle = null;
             if (SfxService.Instance != null)
             {
@@ -163,8 +175,7 @@ namespace VerdantBlade
             resumeSnapshot = null;
             destroyedEntityIds.Clear();
             resetConfirmation = false;
-            Time.timeScale = 1f;
-            SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
+            ReloadCurrentScene();
         }
 
         private void QuitGame()
@@ -193,7 +204,7 @@ namespace VerdantBlade
                 playerX = Player.transform.position.x,
                 playerY = Player.transform.position.y,
                 playerHealth = Player.Health,
-                destroyedEntityIds = string.Join("|", new List<string>(destroyedEntityIds).ToArray())
+                destroyedEntityIds = string.Join("|", destroyedEntityIds)
             };
             PlayerProfile.SaveRunSnapshot(resumeSnapshot);
         }

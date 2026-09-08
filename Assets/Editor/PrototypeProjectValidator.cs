@@ -26,15 +26,7 @@ namespace VerdantBlade.EditorTools
                 issues++;
             }
 
-            var sceneIsInBuild = false;
-            foreach (var scene in EditorBuildSettings.scenes)
-            {
-                if (scene.enabled && scene.path == PrototypeScenePath)
-                {
-                    sceneIsInBuild = true;
-                    break;
-                }
-            }
+            var sceneIsInBuild = System.Array.Exists(EditorBuildSettings.scenes, scene => scene.enabled && scene.path == PrototypeScenePath);
             if (!sceneIsInBuild)
             {
                 Debug.LogWarning("[Verdant Blade] Prototype scene is not enabled in Build Settings.");

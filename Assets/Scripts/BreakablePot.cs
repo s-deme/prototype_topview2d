@@ -5,14 +5,12 @@ namespace VerdantBlade
     public sealed class BreakablePot : MonoBehaviour
     {
         private Collectible.Kind dropKind;
-        private int dropValue;
         private bool broken;
         private string entityId;
 
         public void Configure(Collectible.Kind collectibleKind, int collectibleValue, string stableEntityId = null)
         {
             dropKind = collectibleKind;
-            dropValue = collectibleValue;
             entityId = stableEntityId;
         }
 

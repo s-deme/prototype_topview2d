@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.SceneManagement;
 
 namespace VerdantBlade
 {
@@ -120,16 +119,9 @@ namespace VerdantBlade
         private void Awake()
         {
             Instance = this;
-            SfxVolume = PlayerProfile.LoadSfxVolume();
-            MusicVolume = PlayerProfile.LoadMusicVolume();
-            ReduceFlashing = PlayerProfile.LoadReduceFlashing();
-            ScreenShakeEnabled = PlayerProfile.LoadScreenShake();
-            HighContrast = PlayerProfile.LoadHighContrast();
-            LargeText = PlayerProfile.LoadLargeText();
+            LoadAudioAndAccessibilitySettings();
             SelectedDifficulty = PlayerProfile.LoadDifficulty();
-            SelectedDisplayMode = PlayerProfile.LoadDisplayMode();
-            ResolutionIndex = PlayerProfile.LoadResolutionIndex();
-            VSyncEnabled = PlayerProfile.LoadVSync();
+            LoadDisplayPreferences();
             autoStartRun = startRunOnSceneLoad;
             startRunOnSceneLoad = false;
             if (!autoStartRun)
@@ -275,8 +267,7 @@ namespace VerdantBlade
                 resumeSnapshot = null;
                 destroyedEntityIds.Clear();
                 startRunOnSceneLoad = true;
-                Time.timeScale = 1f;
-                SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
+                ReloadCurrentScene();
                 return;
             }
             StartRun();
@@ -641,7 +632,8 @@ namespace VerdantBlade
             }
             GUI.Label(new Rect(x + 72f, y + 190f, width - 144f, 22f), "挑戦  " + PlayerProfile.AttemptCountFor(profileDifficulty) + "      クリア  " + PlayerProfile.ClearCountFor(profileDifficulty) + "      最高  " + PlayerProfile.BestScoreFor(profileDifficulty), bodyStyle);
             GUI.Label(new Rect(x + 72f, y + 216f, width - 144f, 22f), "欠片  " + PlayerProfile.TotalShardsCollected + "      敵  " + PlayerProfile.TotalEnemiesDefeated + "      壺  " + PlayerProfile.TotalPotsBroken, bodyStyle);
-            var fastest = PlayerProfile.BestClearTimeFor(profileDifficulty) < 0f ? "--:--" : FormatTime(PlayerProfile.BestClearTimeFor(profileDifficulty));
+            var bestClearTime = PlayerProfile.BestClearTimeFor(profileDifficulty);
+            var fastest = bestClearTime < 0f ? "--:--" : FormatTime(bestClearTime);
             GUI.Label(new Rect(x + 72f, y + 242f, width - 144f, 22f), "最速クリア  " + fastest + "      被ダメージ  " + PlayerProfile.TotalDamageTaken, bodyStyle);
 
             GUI.color = AccentColor;
@@ -757,7 +749,8 @@ namespace VerdantBlade
             GUI.Label(new Rect(x + 48f, y + 120f, width - 96f, 22f), "時間  " + FormatTime(ElapsedRunSeconds) + "    " + GameRules.DifficultyName(SelectedDifficulty) + "    フロー " + ComboBonus, bodyStyle);
             GUI.Label(new Rect(x + 48f, y + 146f, width - 96f, 22f), "敵  " + EnemiesDefeated + "    壺  " + PotsBroken + "    被ダメージ  " + DamageTaken, bodyStyle);
             GUI.Label(new Rect(x + 48f, y + 172f, width - 96f, 22f), "最高スコア  " + PlayerProfile.BestScoreFor(SelectedDifficulty) + "    クリア  " + PlayerProfile.ClearCountFor(SelectedDifficulty), bodyStyle);
-            var fastest = PlayerProfile.BestClearTimeFor(SelectedDifficulty) < 0f ? "--:--" : FormatTime(PlayerProfile.BestClearTimeFor(SelectedDifficulty));
+            var bestClearTime = PlayerProfile.BestClearTimeFor(SelectedDifficulty);
+            var fastest = bestClearTime < 0f ? "--:--" : FormatTime(bestClearTime);
             GUI.Label(new Rect(x + 48f, y + 198f, width - 96f, 22f), "最速クリア  " + fastest, bodyStyle);
             DrawNewAchievements(x, y + 236f, width);
             if (DrawMenuButton(new Rect(x + 80f, y + 332f, width - 160f, 32f), 0, resultMenuIndex, "もう一度あそぶ  [R / ENTER]")) { resultMenuIndex = 0; RestartRun(); }
@@ -776,7 +769,7 @@ namespace VerdantBlade
             GUI.color = AccentColor;
             GUI.Label(new Rect(x, y, width, 22f), "新しい実績" + (newAchievements.Count > 1 ? "（複数）" : string.Empty), bodyCenterStyle);
             GUI.color = PrimaryTextColor;
-            GUI.Label(new Rect(x + 48f, y + 26f, width - 96f, 42f), string.Join("  •  ", newAchievements.ToArray()), subtleCenterStyle);
+            GUI.Label(new Rect(x + 48f, y + 26f, width - 96f, 42f), string.Join("  •  ", newAchievements), subtleCenterStyle);
         }
 
         private void DrawBindings(float x, float y, float width, bool fromTitle)
@@ -879,22 +872,15 @@ namespace VerdantBlade
 
         private bool DrawTitleMenuButton(Rect rect, int index, string label)
         {
-            if (titleMenuIndex == index)
-            {
-                var previousColor = GUI.color;
-                GUI.color = new Color(AccentColor.r, AccentColor.g, AccentColor.b, 0.36f);
-                GUI.Box(new Rect(rect.x - 4f, rect.y - 3f, rect.width + 8f, rect.height + 6f), GUIContent.none);
-                GUI.color = previousColor;
-            }
-            return DrawButton(rect, (titleMenuIndex == index ? ">  " : string.Empty) + label);
+            return DrawMenuButton(rect, index, titleMenuIndex, label, 0.36f);
         }
 
-        private bool DrawMenuButton(Rect rect, int index, int selectedIndex, string label)
+        private bool DrawMenuButton(Rect rect, int index, int selectedIndex, string label, float selectionAlpha = 0.46f)
         {
             if (selectedIndex == index)
             {
                 var previousColor = GUI.color;
-                GUI.color = new Color(AccentColor.r, AccentColor.g, AccentColor.b, 0.46f);
+                GUI.color = new Color(AccentColor.r, AccentColor.g, AccentColor.b, selectionAlpha);
                 GUI.Box(new Rect(rect.x - 4f, rect.y - 3f, rect.width + 8f, rect.height + 6f), GUIContent.none);
                 GUI.color = previousColor;
             }

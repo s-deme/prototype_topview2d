@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace VerdantBlade
@@ -205,20 +206,20 @@ namespace VerdantBlade
 
         public static void ResetBindings()
         {
-            EnsureInitialized();
-            foreach (var action in GameInput.Actions)
-            {
-                PlayerPrefs.DeleteKey(BindingPrefix + action);
-            }
-            PlayerPrefs.Save();
+            ResetBindings(BindingPrefix, GameInput.Actions);
         }
 
         public static void ResetGamepadBindings()
         {
+            ResetBindings(GamepadBindingPrefix, GameInput.GamepadActions);
+        }
+
+        private static void ResetBindings(string prefix, IEnumerable<GameAction> actions)
+        {
             EnsureInitialized();
-            foreach (var action in GameInput.GamepadActions)
+            foreach (var action in actions)
             {
-                PlayerPrefs.DeleteKey(GamepadBindingPrefix + action);
+                PlayerPrefs.DeleteKey(prefix + action);
             }
             PlayerPrefs.Save();
         }
@@ -302,7 +303,6 @@ namespace VerdantBlade
                 PlayerPrefs.DeleteKey(AchievementPrefix + id);
             }
             ClearRunSnapshot();
-            PlayerPrefs.Save();
         }
 
         public static void SaveRunSnapshot(RunSnapshot snapshot)

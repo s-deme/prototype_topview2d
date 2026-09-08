@@ -115,10 +115,10 @@ namespace VerdantBlade
         {
             nextVolleyAt = Time.time + 1.85f;
             SfxService.Instance.Play(SoundCue.EnemyShot);
+            var aimedDirection = ((Vector2)hero.transform.position - body.position).normalized;
             for (var index = 0; index < 3; index++)
             {
                 var angle = (index - 1) * 18f;
-                var aimedDirection = ((Vector2)hero.transform.position - body.position).normalized;
                 var rotatedDirection = Quaternion.Euler(0f, 0f, angle) * (Vector3)aimedDirection;
                 var direction = new Vector2(rotatedDirection.x, rotatedDirection.y);
                 var projectile = new GameObject("Warden Bolt");

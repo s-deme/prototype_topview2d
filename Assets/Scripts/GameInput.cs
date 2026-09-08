@@ -31,6 +31,7 @@ namespace VerdantBlade
         {
             GameAction.Attack, GameAction.Dash, GameAction.Pause
         };
+        private static readonly KeyCode[] KeyCodes = (KeyCode[])Enum.GetValues(typeof(KeyCode));
         private static readonly Dictionary<GameAction, KeyCode> bindings = new Dictionary<GameAction, KeyCode>();
         private static readonly Dictionary<GameAction, KeyCode> gamepadBindings = new Dictionary<GameAction, KeyCode>();
         private static bool loaded;
@@ -86,14 +87,15 @@ namespace VerdantBlade
         /// <summary>A compact button label suitable for space-constrained gameplay HUDs.</summary>
         public static string GamepadHintLabel(GameAction action)
         {
-            switch (GetGamepadBinding(action))
+            var key = GetGamepadBinding(action);
+            switch (key)
             {
                 case KeyCode.JoystickButton0: return "A";
                 case KeyCode.JoystickButton1: return "B";
                 case KeyCode.JoystickButton2: return "X";
                 case KeyCode.JoystickButton3: return "Y";
                 case KeyCode.JoystickButton7: return "START";
-                default: return "Btn " + ((int)GetGamepadBinding(action) - (int)KeyCode.JoystickButton0);
+                default: return "Btn " + ((int)key - (int)KeyCode.JoystickButton0);
             }
         }
 
@@ -128,14 +130,7 @@ namespace VerdantBlade
         public static bool IsBoundElsewhere(GameAction action, KeyCode key)
         {
             EnsureLoaded();
-            foreach (var pair in bindings)
-            {
-                if (pair.Key != action && pair.Value == key)
-                {
-                    return true;
-                }
-            }
-            return false;
+            return HasConflictingBinding(bindings, action, key);
         }
 
         public static void SetBinding(GameAction action, KeyCode key)
@@ -159,7 +154,12 @@ namespace VerdantBlade
         public static bool IsGamepadBoundElsewhere(GameAction action, KeyCode key)
         {
             EnsureLoaded();
-            foreach (var pair in gamepadBindings)
+            return HasConflictingBinding(gamepadBindings, action, key);
+        }
+
+        private static bool HasConflictingBinding(Dictionary<GameAction, KeyCode> currentBindings, GameAction action, KeyCode key)
+        {
+            foreach (var pair in currentBindings)
             {
                 if (pair.Key != action && pair.Value == key)
                 {
@@ -189,7 +189,7 @@ namespace VerdantBlade
 
         public static bool TryCaptureKeyboardKey(out KeyCode key)
         {
-            foreach (KeyCode candidate in Enum.GetValues(typeof(KeyCode)))
+            foreach (var candidate in KeyCodes)
             {
                 if ((int)candidate >= (int)KeyCode.Backspace && (int)candidate <= (int)KeyCode.Menu && Input.GetKeyDown(candidate))
                 {
@@ -286,11 +286,7 @@ namespace VerdantBlade
 
         private static bool IsGamepadAction(GameAction action)
         {
-            foreach (var candidate in RebindableGamepadActions)
-            {
-                if (candidate == action) return true;
-            }
-            return false;
+            return Array.IndexOf(RebindableGamepadActions, action) >= 0;
         }
 
         private static bool IsJoystickButton(KeyCode key)
