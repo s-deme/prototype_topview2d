@@ -10,6 +10,9 @@ permissions:
 
 jobs:
   editmode:
+    permissions:
+      contents: read
+      checks: write
     name: EditMode tests
     runs-on: ubuntu-latest
     steps:
@@ -38,6 +41,9 @@ jobs:
           path: artifacts
 
   playmode:
+    permissions:
+      contents: read
+      checks: write
     name: PlayMode tests
     runs-on: ubuntu-latest
     steps:
