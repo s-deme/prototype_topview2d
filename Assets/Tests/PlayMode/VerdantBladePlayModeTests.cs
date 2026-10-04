@@ -7,6 +7,17 @@ namespace VerdantBlade.Tests
 {
     public sealed class VerdantBladePlayModeTests
     {
+        [Test]
+        public void GameplayInputApisAreEnabled()
+        {
+            Assert.DoesNotThrow(() =>
+            {
+                _ = GameInput.Move;
+                _ = GameInput.PrimaryPressed;
+                _ = GameInput.MenuConfirmPressed;
+            });
+        }
+
         [UnityTest]
         public IEnumerator RunClockPersistsAcrossFramesWithoutCountingPausedFrames()
         {
