@@ -36,3 +36,6 @@ Unity 6.3 LTS（`6000.3.22f1`）向けの、外部アセット不要なトップ
 - 保存されるキー／ゲームパッドリマップと、重複を防ぐ入力設定
 - フルスクリーン、ボーダーレス、ウィンドウ、解像度、VSyncを保存するPC表示設定と安全な終了
 - 3種類の欠片配置バリエーション、実績の全件・解除条件表示、同梱日本語フォント
+
+
+Unity Personal CI authentication requires repository Actions secrets UNITY_LICENSE, UNITY_EMAIL, and UNITY_PASSWORD. Register them through GitHub Settings / Secrets and variables / Actions using the existing licensed Unity account; never put their values in Git or chat. Follow https://game.ci/docs/github/activation/. Missing credentials leave Unity CI unverified.
